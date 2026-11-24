@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.core.config import settings
 from app.core.database import Base, engine
+from app.models.brokerage import BrokerageSetting  # noqa: F401
 from app.api.v1.router import api_router
 import logging
 
@@ -15,7 +16,18 @@ Base.metadata.create_all(bind=engine)
 # Safe schema evolution for existing DBs
 with engine.begin() as conn:
     conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS current_value NUMERIC(15, 2)"))
+    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS instrument_code VARCHAR(60)"))
+    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS quantity NUMERIC(15, 4) DEFAULT 1"))
+    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS buy_price NUMERIC(15, 4)"))
+    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS ltp NUMERIC(15, 4)"))
     conn.execute(text("ALTER TABLE investments ALTER COLUMN investment_date DROP NOT NULL"))
+    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+    # Ensure at least the first registered user is admin if none exists
+    conn.execute(text("""
+        UPDATE users SET is_admin = TRUE
+        WHERE id = (SELECT MIN(id) FROM users)
+          AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = TRUE)
+    """))
 
 app = FastAPI(
     title=settings.APP_NAME,

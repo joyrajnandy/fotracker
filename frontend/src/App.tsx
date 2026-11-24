@@ -3,6 +3,7 @@ import { ConfigProvider, theme } from 'antd'
 import { useAuthStore } from '@/store/authStore'
 import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login/Login'
+import RegisterPage from '@/pages/Login/Register'
 import HomePage from '@/pages/Home/Home'
 import TradeBookPage from '@/pages/TradeBook/TradeBook'
 import PnLPage from '@/pages/PnL/PnL'
@@ -19,22 +20,23 @@ export default function App() {
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#4361ee',
-          colorSuccess: '#52c41a',
-          colorError: '#ff4d4f',
-          colorWarning: '#faad14',
-          borderRadius: 8,
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          colorPrimary: '#4f46e5',
+          colorSuccess: '#10b981',
+          colorError: '#ef4444',
+          colorWarning: '#f59e0b',
+          borderRadius: 10,
+          fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
         },
         components: {
-          Layout: { siderBg: '#001529' },
-          Menu: { darkItemBg: '#001529', darkSubMenuItemBg: '#000c17' },
+          Layout: { siderBg: '#0b1120' },
+          Menu: { darkItemBg: 'transparent', darkSubMenuItemBg: '#050816' },
         },
       }}
     >
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
           <Route
             path="/"
             element={

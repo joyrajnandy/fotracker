@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Upload, Space, Select, Typography,
-  Tag, Modal, Descriptions, Progress, message, Row, Col, Statistic, Spin,
+  Tag, Modal, Descriptions, Progress, message, Row, Col, Statistic, Spin, Grid,
 } from 'antd'
 import { UploadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
@@ -12,6 +12,7 @@ const { Title, Text } = Typography
 const { Option } = Select
 
 export default function TradeBookPage() {
+  const screens = Grid.useBreakpoint()
   const [financialYears, setFinancialYears] = useState<string[]>([])
   const [fy, setFy] = useState('')
   const [data, setData] = useState<TradeListResponse | null>(null)
@@ -68,7 +69,7 @@ export default function TradeBookPage() {
   }
 
   const columns = [
-    { title: 'Symbol', dataIndex: 'symbol', key: 'symbol', fixed: 'left' as const, width: 180,
+    { title: 'Symbol', dataIndex: 'symbol', key: 'symbol', fixed: (screens.md ? 'left' : undefined) as 'left' | undefined, width: 180,
       render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Type', dataIndex: 'trade_type', key: 'type', width: 80,
       render: (v: string) => <Tag color={v === 'buy' ? 'green' : 'red'}>{v.toUpperCase()}</Tag> },
