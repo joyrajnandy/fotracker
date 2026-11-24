@@ -6,6 +6,7 @@ export interface User {
   email: string
   full_name?: string
   is_active: boolean
+  is_admin?: boolean
   created_at: string
 }
 
@@ -55,7 +56,11 @@ export interface Investment {
   id: number
   user_id: number
   instrument_type: 'GSec' | 'Mutual Fund' | string
+  instrument_code?: string | null
   name: string
+  quantity?: number | null
+  buy_price?: number | null
+  ltp?: number | null
   invested_value: number
   current_value?: number | null
   investment_date?: string | null
@@ -96,6 +101,7 @@ export interface HomeSummary {
   total_invested: number
   total_interest: number
   total_pnl: number
+  total_brokerage: number
   total_profit: number
   net_value: number
   financial_year: string
@@ -117,11 +123,6 @@ export interface MarketIndex {
   live: boolean
 }
 
-export interface MarketIndicesResponse {
-  indices: MarketIndex[]
-  updated_at: number
-}
-
 export interface PnLByExpiry {
   expiry_date: string | null
   symbol_base: string
@@ -129,14 +130,22 @@ export interface PnLByExpiry {
   total_sell_qty: number
   buy_value: number
   sell_value: number
+  gross_pnl: number
+  brokerage: number
   realized_pnl: number
+  trades_count: number
   status: 'profit' | 'loss' | 'breakeven'
 }
 
 export interface PnLSummary {
   total_profit: number
   total_loss: number
+  gross_net_pnl: number
   net_pnl: number
+  total_brokerage: number
+  calculated_brokerage: number
+  per_trade_fee: number
+  is_custom_brokerage: boolean
   total_trades: number
   profitable_expiries: number
   losing_expiries: number
@@ -177,4 +186,23 @@ export interface TargetAchievement {
   all_quarters: PeriodRow[]
   all_months: PeriodRow[]
   all_weeks: PeriodRow[]
+}
+
+export interface AISuggestion {
+  type: 'success' | 'warning' | 'info'
+  title: string
+  detail: string
+}
+
+export interface AIInsights {
+  financial_year: string
+  health_score: number
+  headline: string
+  metrics: {
+    win_rate: number
+    nifty_pnl: number
+    sensex_pnl: number
+    brokerage_drag_pct: number
+  }
+  suggestions: AISuggestion[]
 }

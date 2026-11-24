@@ -3,7 +3,7 @@
 body {
   margin: 0;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f4f6fb;
+  background: radial-gradient(circle at top right, #eef2ff 0%, #f4f6fb 45%, #f8fafc 100%);
   color: #0f172a;
   -webkit-font-smoothing: antialiased;
 }
@@ -21,60 +21,77 @@ body {
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* Enterprise Layout & Cards */
-.ant-layout { background: #f4f6fb; }
+/* Futuristic Enterprise Layout & Cards */
+.ant-layout { background: transparent; }
 .ant-layout-sider {
-  background: linear-gradient(180deg, #0b1120 0%, #0f172a 100%) !important;
-  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.14);
+  background: linear-gradient(180deg, #050816 0%, #0b1120 60%, #111827 100%) !important;
+  box-shadow: 4px 0 32px rgba(2, 6, 23, 0.25);
+  border-right: 1px solid rgba(99, 102, 241, 0.18);
 }
 .ant-menu-dark { background: transparent !important; }
 .ant-menu-dark .ant-menu-item-selected {
-  background: linear-gradient(90deg, #4361ee 0%, #3b82f6 100%) !important;
-  border-radius: 8px !important;
-  box-shadow: 0 4px 12px rgba(67, 97, 238, 0.35);
+  background: linear-gradient(90deg, #4f46e5 0%, #06b6d4 100%) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 4px 16px rgba(6, 182, 212, 0.35);
 }
 .ant-menu-dark .ant-menu-item {
   margin: 4px 10px !important;
   width: calc(100% - 20px) !important;
-  border-radius: 8px !important;
+  border-radius: 10px !important;
 }
 
 .enterprise-card {
-  border-radius: 14px !important;
-  border: 1px solid #e2e8f0 !important;
-  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04) !important;
-  background: #ffffff !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(226, 232, 240, 0.9) !important;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: blur(10px);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.futuristic-hero {
+  border-radius: 16px !important;
+  background: linear-gradient(135deg, #050816 0%, #1e1b4b 50%, #0f172a 100%) !important;
+  border: 1px solid rgba(56, 189, 248, 0.3) !important;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.22), 0 0 24px rgba(56, 189, 248, 0.08) !important;
+}
+
+.ai-card {
+  border-radius: 16px !important;
+  background: linear-gradient(135deg, #0b1120 0%, #172554 100%) !important;
+  border: 1px solid rgba(139, 92, 246, 0.4) !important;
+  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.16) !important;
+  color: #f8fafc !important;
 }
 
 .ant-table-thead > tr > th {
   background: #f8fafc !important;
   color: #475569 !important;
   font-weight: 600 !important;
-  font-size: 12px !important;
+  font-size: 11px !important;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
-/* Upload area */
 .upload-dragger .ant-upload-drag { border-radius: 12px; }
 
-/* Target cards */
 .target-card-achieved { border-left: 4px solid #10b981 !important; }
 .target-card-pending  { border-left: 4px solid #ef4444 !important; }
 
-/* Enterprise Stat Cards */
-.stat-card-blue   { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #fff; box-shadow: 0 8px 20px rgba(59, 130, 246, 0.22); }
-.stat-card-green  { background: linear-gradient(135deg, #065f46 0%, #10b981 100%); color: #fff; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.22); }
-.stat-card-orange { background: linear-gradient(135deg, #b45309 0%, #f59e0b 100%); color: #fff; box-shadow: 0 8px 20px rgba(245, 158, 11, 0.22); }
-.stat-card-red    { background: linear-gradient(135deg, #9f1239 0%, #f43f5e 100%); color: #fff; box-shadow: 0 8px 20px rgba(244, 63, 94, 0.22); }
-.stat-card-purple { background: linear-gradient(135deg, #312e81 0%, #6366f1 100%); color: #fff; box-shadow: 0 8px 20px rgba(99, 102, 241, 0.22); }
+/* Futuristic Stat Cards */
+.stat-card-blue   { background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%); color: #fff; box-shadow: 0 8px 22px rgba(37, 99, 235, 0.24); }
+.stat-card-green  { background: linear-gradient(135deg, #065f46 0%, #10b981 100%); color: #fff; box-shadow: 0 8px 22px rgba(16, 185, 129, 0.24); }
+.stat-card-orange { background: linear-gradient(135deg, #b45309 0%, #f59e0b 100%); color: #fff; box-shadow: 0 8px 22px rgba(245, 158, 11, 0.24); }
+.stat-card-red    { background: linear-gradient(135deg, #9f1239 0%, #f43f5e 100%); color: #fff; box-shadow: 0 8px 22px rgba(244, 63, 94, 0.24); }
+.stat-card-purple { background: linear-gradient(135deg, #312e81 0%, #6366f1 100%); color: #fff; box-shadow: 0 8px 22px rgba(99, 102, 241, 0.24); }
+.stat-card-cyan   { background: linear-gradient(135deg, #0e7490 0%, #06b6d4 100%); color: #fff; box-shadow: 0 8px 22px rgba(6, 182, 212, 0.24); }
 
 .row-future { opacity: 0.55; }
 .row-achieved { background: #f0fdf4; }
 
 @keyframes pulseDot {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.45; transform: scale(0.85); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
 .live-dot {
   display: inline-block;
@@ -82,5 +99,47 @@ body {
   height: 8px;
   border-radius: 50%;
   background: #10b981;
+  box-shadow: 0 0 8px #10b981;
   animation: pulseDot 1.6s ease-in-out infinite;
+}
+
+/* ── Responsive Mobile & Tablet Support ─────────────────────────────────── */
+@media (max-width: 768px) {
+  .ant-card-body {
+    padding: 14px !important;
+  }
+  .ant-card-head {
+    padding: 0 14px !important;
+    min-height: 46px !important;
+  }
+  .ant-form-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ant-form-inline .ant-form-item {
+    width: 100% !important;
+    margin-inline-end: 0 !important;
+    margin-bottom: 0 !important;
+  }
+  .ant-form-inline .ant-form-item .ant-input-number,
+  .ant-form-inline .ant-form-item .ant-picker,
+  .ant-form-inline .ant-form-item .ant-input,
+  .ant-form-inline .ant-form-item .ant-select {
+    width: 100% !important;
+  }
+  .ant-statistic-content-value {
+    font-size: 17px !important;
+  }
+}
+
+@media (max-width: 576px) {
+  .ant-card-head-title {
+    font-size: 14px !important;
+    white-space: normal !important;
+  }
+  .ant-modal {
+    max-width: calc(100vw - 24px) !important;
+    margin: 12px auto !important;
+  }
 }

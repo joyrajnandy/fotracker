@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 import time
+import uuid
+from jose import jwt
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.core.dependencies import get_current_user
@@ -11,10 +15,10 @@ from app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# Simple in-memory sliding-window rate limiter for auth endpoints (pen-test brute-force protection)
 _auth_attempts: dict[str, list[float]] = defaultdict(list)
 _RATE_WINDOW_SEC = 60
 _MAX_ATTEMPTS = 15
+_used_invite_jtis: set[str] = set()
 
 
 def _check_rate_limit(request: Request):
@@ -30,11 +34,57 @@ def _check_rate_limit(request: Request):
     _auth_attempts[client_ip].append(now)
 
 
+def _validate_invite(token: str) -> dict:
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "invite":
+        raise HTTPException(status_code=403, detail="Invalid or expired registration invite link.")
+    jti = payload.get("jti")
+    if jti and jti in _used_invite_jtis:
+        raise HTTPException(status_code=403, detail="This registration invite link has already been used.")
+    return payload
+
+
+@router.post("/invite-link")
+def create_invite_link(current_user: User = Depends(get_current_user)):
+    """Admin-only: generate a 10-minute registration invite link."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admin users can generate registration links.")
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    jti = str(uuid.uuid4())
+    token = jwt.encode(
+        {
+            "type": "invite",
+            "jti": jti,
+            "invited_by": current_user.id,
+            "exp": expires_at,
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    return {
+        "invite_token": token,
+        "expires_at": expires_at.isoformat(),
+        "expires_in_seconds": 600,
+    }
+
+
+@router.get("/invite-validate")
+def validate_invite_link(token: str = Query(...)):
+    """Validate whether a 10-minute invite token is still active."""
+    payload = _validate_invite(token)
+    exp = payload.get("exp")
+    return {"valid": True, "exp": exp}
+
+
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserCreate, request: Request, db: Session = Depends(get_db)):
-    """Register a new user account."""
+    """Register a new user account using a valid 10-minute admin invite token."""
     _check_rate_limit(request)
-    return create_user(db, user_data)
+    payload = _validate_invite(user_data.invite_token)
+    user = create_user(db, user_data)
+    if payload.get("jti"):
+        _used_invite_jtis.add(payload["jti"])
+    return user
 
 
 @router.post("/login", response_model=Token)

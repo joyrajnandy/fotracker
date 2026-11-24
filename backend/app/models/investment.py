@@ -9,8 +9,12 @@ class Investment(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    instrument_type = Column(String(50), nullable=False)   # gsec, mutual_fund, fd, equity, etc.
+    instrument_type = Column(String(50), nullable=False)   # GSec, Mutual Fund
+    instrument_code = Column(String(60), nullable=True)    # e.g. AMFI code or NSE/BSE ticker
     name = Column(String(200), nullable=False)
+    quantity = Column(Numeric(15, 4), nullable=True, default=1)
+    buy_price = Column(Numeric(15, 4), nullable=True)
+    ltp = Column(Numeric(15, 4), nullable=True)
     invested_value = Column(Numeric(15, 2), nullable=False)
     investment_date = Column(Date, nullable=True)
     financial_year = Column(String(10), nullable=False, index=True)

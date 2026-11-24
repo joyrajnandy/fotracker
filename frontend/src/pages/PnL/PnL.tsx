@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import {
   Row, Col, Card, Statistic, Select, Table, Tag, Typography, Space, Spin, Segmented,
+  InputNumber, Button, message, Tooltip,
 } from 'antd'
 import {
-  ArrowUpOutlined, ArrowDownOutlined, SwapOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, SwapOutlined, EditOutlined, UndoOutlined, CheckOutlined,
 } from '@ant-design/icons'
 import {
-  PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell, Tooltip as ReTooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts'
 import { pnlApi, homeApi } from '@/services/api'
@@ -28,6 +29,8 @@ export default function PnLPage() {
   const [loading, setLoading] = useState(false)
   const [indexFilter, setIndexFilter] = useState<string>('ALL')
   const [graphScope, setGraphScope] = useState<string>('TOP20')
+  const [editingBrokerage, setEditingBrokerage] = useState(false)
+  const [customBrokerage, setCustomBrokerage] = useState<number>(0)
 
   useEffect(() => {
     homeApi.getFinancialYears().then(({ data }) => {
@@ -40,13 +43,46 @@ export default function PnLPage() {
     if (!fy) return
     setLoading(true)
     pnlApi.getSummary(fy)
-      .then(({ data }) => setSummary(data))
+      .then(({ data }) => {
+        setSummary(data)
+        setCustomBrokerage(data.total_brokerage)
+      })
       .finally(() => setLoading(false))
   }, [fy])
 
+  async function saveBrokerage() {
+    if (!fy) return
+    setLoading(true)
+    try {
+      const { data } = await pnlApi.updateBrokerage(fy, customBrokerage, 69)
+      setSummary(data)
+      setEditingBrokerage(false)
+      message.success('Total brokerage updated')
+    } catch {
+      message.error('Failed to update brokerage')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function resetBrokerage() {
+    if (!fy) return
+    setLoading(true)
+    try {
+      const { data } = await pnlApi.updateBrokerage(fy, null, 69)
+      setSummary(data)
+      setCustomBrokerage(data.total_brokerage)
+      setEditingBrokerage(false)
+      message.success('Brokerage reset to ₹69 per trade')
+    } catch {
+      message.error('Failed to reset brokerage')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const allExpiries = summary?.by_expiry ?? []
 
-  // Filter for SENSEX / NIFTY weekly expiry detail
   const filteredExpiries = allExpiries.filter((e) => {
     if (indexFilter === 'ALL') return true
     return e.symbol_base.toUpperCase().includes(indexFilter)
@@ -54,8 +90,8 @@ export default function PnLPage() {
 
   const pieData = summary
     ? [
-        { name: 'Profit', value: summary.total_profit },
-        { name: 'Loss', value: summary.total_loss },
+        { name: 'Net Profit', value: summary.total_profit },
+        { name: 'Net Loss', value: summary.total_loss },
       ].filter((d) => d.value > 0)
     : []
 
@@ -67,7 +103,7 @@ export default function PnLPage() {
 
   const columns = [
     {
-      title: 'Index / Symbol',
+      title: 'Index',
       dataIndex: 'symbol_base',
       key: 'sym',
       render: (v: string) => (
@@ -83,35 +119,31 @@ export default function PnLPage() {
       render: (v: string | null) => v ?? '—',
     },
     {
-      title: 'Buy Qty',
-      dataIndex: 'total_buy_qty',
-      key: 'bq',
+      title: 'Trades',
+      dataIndex: 'trades_count',
+      key: 'tc',
       align: 'right' as const,
-      render: (v: number) => v.toLocaleString(),
     },
     {
-      title: 'Sell Qty',
-      dataIndex: 'total_sell_qty',
-      key: 'sq',
+      title: 'Gross P&L',
+      dataIndex: 'gross_pnl',
+      key: 'gpnl',
       align: 'right' as const,
-      render: (v: number) => v.toLocaleString(),
+      render: (v: number) => (
+        <Text style={{ color: v >= 0 ? '#10b981' : '#ef4444' }}>
+          {v >= 0 ? '+' : '-'}{fmt(v)}
+        </Text>
+      ),
     },
     {
-      title: 'Buy Value (₹)',
-      dataIndex: 'buy_value',
-      key: 'bv',
+      title: 'Brokerage',
+      dataIndex: 'brokerage',
+      key: 'brk',
       align: 'right' as const,
-      render: (v: number) => fmt(v),
+      render: (v: number) => <Text type="secondary">-{fmt(v)}</Text>,
     },
     {
-      title: 'Sell Value (₹)',
-      dataIndex: 'sell_value',
-      key: 'sv',
-      align: 'right' as const,
-      render: (v: number) => fmt(v),
-    },
-    {
-      title: 'Realized P&L (₹)',
+      title: 'Net P&L (After Brokerage)',
       dataIndex: 'realized_pnl',
       key: 'pnl',
       align: 'right' as const,
@@ -139,7 +171,7 @@ export default function PnLPage() {
         <div>
           <Title level={3} style={{ margin: 0 }}>Profit &amp; Loss Analytics</Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Weekly Expiry Performance across SENSEX &amp; NIFTY
+            Weekly Expiry Performance across SENSEX &amp; NIFTY (Net of ₹69/trade Brokerage)
           </Text>
         </div>
         <Space wrap>
@@ -164,7 +196,7 @@ export default function PnLPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card className="stat-card-green" style={{ borderRadius: 14, border: 'none' }}>
             <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Profit</Text>}
+              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Net Profit</Text>}
               value={summary?.total_profit ?? 0}
               prefix="₹"
               valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
@@ -176,7 +208,7 @@ export default function PnLPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card className="stat-card-red" style={{ borderRadius: 14, border: 'none' }}>
             <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Loss</Text>}
+              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Net Loss</Text>}
               value={summary?.total_loss ?? 0}
               prefix="₹"
               valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
@@ -188,7 +220,7 @@ export default function PnLPage() {
         <Col xs={24} sm={12} lg={6}>
           <Card className={(summary?.net_pnl ?? 0) >= 0 ? 'stat-card-blue' : 'stat-card-red'} style={{ borderRadius: 14, border: 'none' }}>
             <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Net P&amp;L</Text>}
+              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Net P&amp;L (After Brokerage)</Text>}
               value={Math.abs(summary?.net_pnl ?? 0)}
               prefix={(summary?.net_pnl ?? 0) >= 0 ? '+₹' : '-₹'}
               valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
@@ -208,12 +240,81 @@ export default function PnLPage() {
         </Col>
       </Row>
 
-      {/* Full-width Bar Chart (so entire Top 20 / All graph is clearly visible) */}
+      {/* Brokerage Calculation & Editable Override Card */}
+      <Card
+        className="enterprise-card"
+        style={{ marginBottom: 20 }}
+        title={
+          <Space>
+            <span>Brokerage &amp; Charges (₹69 / Trade)</span>
+            {summary?.is_custom_brokerage
+              ? <Tag color="orange">Custom Override Active</Tag>
+              : <Tag color="blue">Auto Calculated</Tag>}
+          </Space>
+        }
+        extra={
+          editingBrokerage ? (
+            <Space>
+              <Button type="primary" size="small" icon={<CheckOutlined />} onClick={saveBrokerage}>Save</Button>
+              <Button size="small" icon={<UndoOutlined />} onClick={resetBrokerage}>Reset to ₹69/trade</Button>
+            </Space>
+          ) : (
+            <Button size="small" icon={<EditOutlined />} onClick={() => setEditingBrokerage(true)}>
+              Edit Total Brokerage
+            </Button>
+          )
+        }
+      >
+        <Row gutter={[24, 12]} align="middle">
+          <Col xs={12} sm={6}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Gross F&amp;O P&amp;L</Text>
+            <Text strong className="num-tabular" style={{
+              fontSize: 17, color: (summary?.gross_net_pnl ?? 0) >= 0 ? '#10b981' : '#ef4444',
+            }}>
+              {(summary?.gross_net_pnl ?? 0) >= 0 ? '+' : '-'}{fmt(summary?.gross_net_pnl ?? 0)}
+            </Text>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
+              Auto ({summary?.total_trades ?? 0} × ₹{summary?.per_trade_fee ?? 69})
+            </Text>
+            <Text strong className="num-tabular" style={{ fontSize: 17 }}>
+              {fmt(summary?.calculated_brokerage ?? 0)}
+            </Text>
+          </Col>
+          <Col xs={12} sm={6}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Applied Total Brokerage</Text>
+            {editingBrokerage ? (
+              <InputNumber
+                min={0}
+                prefix="₹"
+                value={customBrokerage}
+                onChange={(v) => setCustomBrokerage(Number(v ?? 0))}
+                style={{ width: 160 }}
+              />
+            ) : (
+              <Text strong className="num-tabular" style={{ fontSize: 17, color: '#ef4444' }}>
+                -{fmt(summary?.total_brokerage ?? 0)}
+              </Text>
+            )}
+          </Col>
+          <Col xs={12} sm={6}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Net P&amp;L (After Brokerage)</Text>
+            <Text strong className="num-tabular" style={{
+              fontSize: 17, color: (summary?.net_pnl ?? 0) >= 0 ? '#10b981' : '#ef4444',
+            }}>
+              {(summary?.net_pnl ?? 0) >= 0 ? '+' : '-'}{fmt(summary?.net_pnl ?? 0)}
+            </Text>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Full-width Bar Chart */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         <Col span={24}>
           <Card
             className="enterprise-card"
-            title={`P&L by Expiry (${graphScope === 'TOP20' ? 'Top 20' : 'All Expiries'})`}
+            title={`P&L by Expiry (${graphScope === 'TOP20' ? 'Top 20' : 'All Expiries'}) — Net of Brokerage`}
             extra={
               <Segmented
                 size="small"
@@ -240,8 +341,8 @@ export default function PnLPage() {
                   />
                   <YAxis tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />
                   <ReferenceLine y={0} stroke="#64748b" />
-                  <Tooltip formatter={(v: number) => fmt(v)} />
-                  <Bar dataKey="pnl" name="Realized P&L" radius={[4, 4, 0, 0]} maxBarSize={36}>
+                  <ReTooltip formatter={(v: number) => fmt(v)} />
+                  <Bar dataKey="pnl" name="Net P&L" radius={[4, 4, 0, 0]} maxBarSize={36}>
                     {barData.map((d, i) => (
                       <Cell key={i} fill={d.pnl >= 0 ? '#10b981' : '#ef4444'} />
                     ))}
@@ -255,14 +356,14 @@ export default function PnLPage() {
         </Col>
 
         <Col xs={24} lg={8}>
-          <Card className="enterprise-card" title="Profit vs Loss Split" style={{ height: '100%' }}>
+          <Card className="enterprise-card" title="Net Profit vs Loss Split" style={{ height: '100%' }}>
             {pieData.length > 0 ? (
               <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
                   <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} label>
                     {pieData.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number) => fmt(v)} />
+                  <ReTooltip formatter={(v: number) => fmt(v)} />
                   <Legend />
                 </PieChart>
               </ResponsiveContainer>

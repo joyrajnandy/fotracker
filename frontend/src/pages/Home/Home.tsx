@@ -2,21 +2,22 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Row, Col, Card, Statistic, Select, Button, Form, Input,
   InputNumber, DatePicker, Table, Typography, Space,
-  message, Collapse, Tag, Spin, Tooltip, Modal, Progress, Slider,
+  message, Collapse, Tag, Spin, Tooltip, Modal, Progress, Slider, Upload, Alert,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, RiseOutlined, FallOutlined,
   DollarOutlined, BankOutlined, PercentageOutlined, SwapOutlined,
   InfoCircleOutlined, EditOutlined, ForwardOutlined, ReloadOutlined,
-  ThunderboltOutlined, PieChartOutlined,
+  ThunderboltOutlined, PieChartOutlined, RobotOutlined, UploadOutlined,
+  SyncOutlined, CheckCircleOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip as ReTooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import dayjs from 'dayjs'
-import { homeApi, brokerCashApi, marketApi } from '@/services/api'
-import type { HomeSummary, Investment, Interest, BrokerCash, MarketIndex } from '@/types'
+import { homeApi, brokerCashApi, marketApi, aiApi } from '@/services/api'
+import type { HomeSummary, Investment, Interest, BrokerCash, MarketIndex, AIInsights } from '@/types'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -39,7 +40,10 @@ export default function HomePage() {
   const [interests, setInterests] = useState<Interest[]>([])
   const [brokerCash, setBrokerCash] = useState<BrokerCash[]>([])
   const [indices, setIndices] = useState<MarketIndex[]>([])
+  const [aiInsights, setAiInsights] = useState<AIInsights | null>(null)
   const [marketLoading, setMarketLoading] = useState(false)
+  const [ltpRefreshing, setLtpRefreshing] = useState(false)
+  const [fetchingSingleLtp, setFetchingSingleLtp] = useState(false)
   const [loading, setLoading] = useState(true)
   const [simRate, setSimRate] = useState<number>(10)
 
@@ -48,13 +52,21 @@ export default function HomePage() {
   const [cashForm] = Form.useForm()
   const [editHoldingForm] = Form.useForm()
   const [editCashForm] = Form.useForm()
+  const [editIntForm] = Form.useForm()
 
   const [editHoldingOpen, setEditHoldingOpen] = useState(false)
   const [editingHolding, setEditingHolding] = useState<Investment | null>(null)
   const [editCashOpen, setEditCashOpen] = useState(false)
   const [editingCash, setEditingCash] = useState<BrokerCash | null>(null)
+  const [editIntOpen, setEditIntOpen] = useState(false)
+  const [editingInt, setEditingInt] = useState<Interest | null>(null)
   const [carryModalOpen, setCarryModalOpen] = useState(false)
   const [carryLoading, setCarryLoading] = useState(false)
+
+  // Live preview of Qty * Buy & Qty * LTP in Add Holding form
+  const addQty = Form.useWatch('quantity', invForm) ?? 1
+  const addBuy = Form.useWatch('buy_price', invForm) ?? 0
+  const addLtp = Form.useWatch('ltp', invForm)
 
   const fetchMarket = useCallback(async () => {
     setMarketLoading(true)
@@ -88,11 +100,13 @@ export default function HomePage() {
       homeApi.getInvestments(fy),
       homeApi.getInterests(fy),
       brokerCashApi.list(fy),
-    ]).then(([s, inv, int, bc]) => {
+      aiApi.getInsights(fy).catch(() => ({ data: null })),
+    ]).then(([s, inv, int, bc, ai]) => {
       setSummary(s.data)
       setInvestments(inv.data)
       setInterests(int.data)
       setBrokerCash(bc.data)
+      setAiInsights(ai.data)
     }).finally(() => setLoading(false))
   }, [fy])
 
@@ -102,15 +116,52 @@ export default function HomePage() {
     refreshData()
   }, [fy, refreshData])
 
-  // ── CRUD Handlers ─────────────────────────────────────────────────────────
+  // ── Live LTP helpers ──────────────────────────────────────────────────────
+  async function fetchLtpForForm(formInstance: any) {
+    const code = formInstance.getFieldValue('instrument_code')
+    const type = formInstance.getFieldValue('instrument_type')
+    if (!code) {
+      message.warning('Enter an Instrument Code first (e.g. AMFI code 119551 or GOLDBEES.NS)')
+      return
+    }
+    setFetchingSingleLtp(true)
+    try {
+      const { data } = await marketApi.getLtp(code, type)
+      formInstance.setFieldValue('ltp', data.ltp)
+      if (!formInstance.getFieldValue('name') && data.name) {
+        formInstance.setFieldValue('name', data.name)
+      }
+      message.success(`Live LTP fetched from ${data.source}: ₹${data.ltp}`)
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to fetch live LTP')
+    } finally {
+      setFetchingSingleLtp(false)
+    }
+  }
 
+  async function refreshAllHoldingsLtp() {
+    setLtpRefreshing(true)
+    try {
+      const { data } = await homeApi.refreshAllLtp(fy)
+      message.success(`Updated live LTP for ${data.updated} holding(s)`)
+      refreshData()
+    } catch {
+      message.error('Failed to refresh LTPs')
+    } finally {
+      setLtpRefreshing(false)
+    }
+  }
+
+  // ── CRUD Handlers ─────────────────────────────────────────────────────────
   async function addHolding(values: any) {
     try {
       await homeApi.addInvestment({
         instrument_type: values.instrument_type,
+        instrument_code: values.instrument_code || null,
         name: values.name,
-        invested_value: values.invested_value,
-        current_value: values.current_value ?? null,
+        quantity: values.quantity ?? 1,
+        buy_price: values.buy_price,
+        ltp: values.ltp ?? null,
         financial_year: fy,
       })
       message.success('Holding added')
@@ -125,9 +176,11 @@ export default function HomePage() {
     setEditingHolding(row)
     editHoldingForm.setFieldsValue({
       instrument_type: row.instrument_type,
+      instrument_code: row.instrument_code || '',
       name: row.name,
-      invested_value: Number(row.invested_value),
-      current_value: row.current_value != null ? Number(row.current_value) : null,
+      quantity: Number(row.quantity ?? 1),
+      buy_price: Number(row.buy_price ?? row.invested_value),
+      ltp: row.ltp != null ? Number(row.ltp) : (row.current_value != null ? Number(row.current_value) / Number(row.quantity || 1) : null),
     })
     setEditHoldingOpen(true)
   }
@@ -137,9 +190,11 @@ export default function HomePage() {
     try {
       await homeApi.updateInvestment(editingHolding.id, {
         instrument_type: values.instrument_type,
+        instrument_code: values.instrument_code || null,
         name: values.name,
-        invested_value: values.invested_value,
-        current_value: values.current_value ?? null,
+        quantity: values.quantity,
+        buy_price: values.buy_price,
+        ltp: values.ltp ?? null,
       })
       message.success('Holding updated')
       setEditHoldingOpen(false)
@@ -171,6 +226,20 @@ export default function HomePage() {
     } catch (err: any) {
       message.error(err?.response?.data?.detail || 'Failed to add cash entry')
     }
+  }
+
+  async function handleCashCsvUpload(file: File) {
+    try {
+      const { data } = await brokerCashApi.uploadCsv(file)
+      message.success(`CSV imported: ${data.inserted} added, ${data.skipped} skipped`)
+      if (data.errors?.length) {
+        message.warning(`Some rows had errors: ${data.errors[0]}`)
+      }
+      refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'CSV upload failed')
+    }
+    return false
   }
 
   function openEditCash(row: BrokerCash) {
@@ -222,6 +291,40 @@ export default function HomePage() {
     }
   }
 
+  function openEditInterest(row: Interest) {
+    setEditingInt(row)
+    editIntForm.setFieldsValue({
+      amount: Number(row.amount),
+      interest_date: dayjs(row.interest_date),
+      description: row.description || '',
+    })
+    setEditIntOpen(true)
+  }
+
+  async function saveEditInterest(values: any) {
+    if (!editingInt) return
+    try {
+      await homeApi.updateInterest(editingInt.id, {
+        amount: values.amount,
+        interest_date: values.interest_date.format('YYYY-MM-DD'),
+        description: values.description || null,
+      })
+      message.success('Interest entry updated')
+      setEditIntOpen(false)
+      refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update interest')
+    }
+  }
+
+  async function deleteInterest(id: number) {
+    try {
+      await homeApi.deleteInterest(id)
+      message.success('Interest entry deleted')
+      refreshData()
+    } catch { message.error('Failed to delete interest') }
+  }
+
   async function doCarryForward(values: any) {
     setCarryLoading(true)
     try {
@@ -260,47 +363,55 @@ export default function HomePage() {
   // ── Table Columns ─────────────────────────────────────────────────────────
   const holdingColumns = [
     {
-      title: 'Type', dataIndex: 'instrument_type', key: 'type', width: 130,
-      render: (v: string) => (
-        <Tag color={v === 'GSec' ? 'geekblue' : 'purple'} style={{ fontWeight: 600 }}>{v}</Tag>
-      ),
+      title: 'Instrument', dataIndex: 'instrument_type', key: 'type', width: 120,
+      render: (v: string) => <Tag color={v === 'GSec' ? 'geekblue' : 'purple'} style={{ fontWeight: 600 }}>{v}</Tag>,
+    },
+    {
+      title: 'Code', dataIndex: 'instrument_code', key: 'code', width: 110,
+      render: (v: string | null) => v ? <Tag>{v}</Tag> : <Text type="secondary">—</Text>,
     },
     { title: 'Name', dataIndex: 'name', key: 'name', render: (v: string) => <Text strong>{v}</Text> },
     {
-      title: 'Invested (₹)', dataIndex: 'invested_value', key: 'invested',
-      align: 'right' as const, render: (v: number) => fmt(v),
+      title: 'Qty', dataIndex: 'quantity', key: 'qty', align: 'right' as const, width: 90,
+      render: (v: number | null) => (v != null ? Number(v).toLocaleString('en-IN', { maximumFractionDigits: 4 }) : '1'),
     },
     {
-      title: 'Current Value (₹)', dataIndex: 'current_value', key: 'cv',
-      align: 'right' as const,
+      title: 'Buy Value', dataIndex: 'buy_price', key: 'buy', align: 'right' as const, width: 110,
+      render: (v: number | null, row: Investment) => fmt(Number(v ?? row.invested_value)),
+    },
+    {
+      title: 'LTP', dataIndex: 'ltp', key: 'ltp', align: 'right' as const, width: 110,
       render: (v: number | null) => (
-        <Text style={{ color: v != null ? '#2563eb' : '#94a3b8', fontWeight: v != null ? 600 : 400 }}>
-          {v != null ? fmt(v) : '—'}
-        </Text>
+        <Text style={{ color: v != null ? '#2563eb' : '#94a3b8' }}>{v != null ? fmt(Number(v)) : '—'}</Text>
       ),
     },
     {
-      title: 'Holding P&L (₹)', key: 'holding_pnl', align: 'right' as const,
+      title: 'Invested (Qty×Buy)', dataIndex: 'invested_value', key: 'invested',
+      align: 'right' as const, render: (v: number) => <Text strong>{fmt(v)}</Text>,
+    },
+    {
+      title: 'Current Value (Qty×LTP)', dataIndex: 'current_value', key: 'cv',
+      align: 'right' as const,
+      render: (v: number | null) => (
+        <Text strong style={{ color: v != null ? '#2563eb' : '#94a3b8' }}>{v != null ? fmt(v) : '—'}</Text>
+      ),
+    },
+    {
+      title: 'Holding P&L', key: 'holding_pnl', align: 'right' as const,
       render: (_: any, row: Investment) => {
         if (row.current_value == null) return <Text type="secondary">—</Text>
         const pnl = Number(row.current_value) - Number(row.invested_value)
         return (
-          <Text strong style={{ color: pnl >= 0 ? '#10b981' : '#ef4444' }}>
-            {fmtSigned(pnl)}
-          </Text>
+          <Text strong style={{ color: pnl >= 0 ? '#10b981' : '#ef4444' }}>{fmtSigned(pnl)}</Text>
         )
       },
     },
     {
-      title: 'Actions', key: 'action', width: 100, align: 'center' as const,
+      title: 'Actions', key: 'action', width: 90, align: 'center' as const,
       render: (_: any, row: Investment) => (
         <Space size={4}>
-          <Tooltip title="Edit holding">
-            <Button icon={<EditOutlined />} size="small" onClick={() => openEditHolding(row)} />
-          </Tooltip>
-          <Tooltip title="Delete holding">
-            <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteHolding(row.id)} />
-          </Tooltip>
+          <Button icon={<EditOutlined />} size="small" onClick={() => openEditHolding(row)} />
+          <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteHolding(row.id)} />
         </Space>
       ),
     },
@@ -309,8 +420,7 @@ export default function HomePage() {
   const cashColumns = [
     {
       title: 'Cash Added (₹)', dataIndex: 'amount', key: 'amount',
-      align: 'right' as const,
-      render: (v: number) => <Text strong style={{ color: '#0f172a' }}>{fmt(v)}</Text>,
+      align: 'right' as const, render: (v: number) => <Text strong>{fmt(v)}</Text>,
     },
     { title: 'Date Added', dataIndex: 'cash_date', key: 'date', width: 140 },
     { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
@@ -318,12 +428,8 @@ export default function HomePage() {
       title: 'Actions', key: 'action', width: 100, align: 'center' as const,
       render: (_: any, row: BrokerCash) => (
         <Space size={4}>
-          <Tooltip title="Edit cash entry">
-            <Button icon={<EditOutlined />} size="small" onClick={() => openEditCash(row)} />
-          </Tooltip>
-          <Tooltip title="Delete cash entry">
-            <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteCash(row.id)} />
-          </Tooltip>
+          <Button icon={<EditOutlined />} size="small" onClick={() => openEditCash(row)} />
+          <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteCash(row.id)} />
         </Space>
       ),
     },
@@ -333,28 +439,33 @@ export default function HomePage() {
     { title: 'Amount (₹)', dataIndex: 'amount', key: 'amount', render: (v: number) => fmt(v), align: 'right' as const },
     { title: 'Date', dataIndex: 'interest_date', key: 'date', width: 140 },
     { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
+    {
+      title: 'Actions', key: 'action', width: 100, align: 'center' as const,
+      render: (_: any, row: Interest) => (
+        <Space size={4}>
+          <Button icon={<EditOutlined />} size="small" onClick={() => openEditInterest(row)} />
+          <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteInterest(row.id)} />
+        </Space>
+      ),
+    },
   ]
 
   return (
     <Spin spinning={loading}>
       {/* ── Live SENSEX & NIFTY 50 Market Pulse Bar ───────────────────────── */}
       <Card
-        className="enterprise-card"
+        className="futuristic-hero"
         bodyStyle={{ padding: '12px 20px' }}
-        style={{
-          marginBottom: 20,
-          background: 'linear-gradient(90deg, #0f172a 0%, #1e293b 100%)',
-          border: '1px solid #334155',
-        }}
+        style={{ marginBottom: 20 }}
       >
         <Row align="middle" justify="space-between" gutter={[16, 12]}>
           <Col>
             <Space size={10}>
               <span className="live-dot" />
-              <Text strong style={{ color: '#f8fafc', fontSize: 13, letterSpacing: '0.04em' }}>
+              <Text strong style={{ color: '#f8fafc', fontSize: 13, letterSpacing: '0.05em' }}>
                 LIVE MARKET PULSE
               </Text>
-              <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>NSE / BSE</Tag>
+              <Tag color="cyan" style={{ margin: 0, fontSize: 11 }}>NSE / BSE</Tag>
             </Space>
           </Col>
           <Col flex="auto">
@@ -369,8 +480,8 @@ export default function HomePage() {
                     <Space size={12} style={{
                       background: 'rgba(255,255,255,0.06)',
                       padding: '6px 14px',
-                      borderRadius: 8,
-                      border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: 10,
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
                     }}>
                       <Text strong style={{ color: '#cbd5e1', fontSize: 12 }}>{idx.symbol}</Text>
                       {idx.live && idx.price != null ? (
@@ -392,17 +503,12 @@ export default function HomePage() {
             </Row>
           </Col>
           <Col>
-            <Tooltip title="Refresh live SENSEX & NIFTY quotes">
-              <Button
-                size="small"
-                ghost
-                icon={<ReloadOutlined spin={marketLoading} />}
-                onClick={fetchMarket}
-                style={{ color: '#cbd5e1', borderColor: '#475569' }}
-              >
-                Refresh
-              </Button>
-            </Tooltip>
+            <Button
+              size="small" ghost icon={<ReloadOutlined spin={marketLoading} />}
+              onClick={fetchMarket} style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)' }}
+            >
+              Refresh
+            </Button>
           </Col>
         </Row>
       </Card>
@@ -410,9 +516,9 @@ export default function HomePage() {
       {/* ── Page Header ───────────────────────────────────────────────────── */}
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 20 }} wrap>
         <div>
-          <Title level={3} style={{ margin: 0, color: '#0f172a' }}>Portfolio Overview</Title>
+          <Title level={3} style={{ margin: 0, color: '#0f172a' }}>Portfolio Command Center</Title>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            Real capital via Broker Cash • GSec &amp; Mutual Fund Holdings • F&amp;O Performance
+            Broker Cash Investment • GSec &amp; MF Holdings • AI Performance Strategist
           </Text>
         </div>
         <Space wrap>
@@ -420,26 +526,19 @@ export default function HomePage() {
           <Select value={fy} onChange={setFy} style={{ width: 120 }}>
             {financialYears.map((y) => <Option key={y} value={y}>{y}</Option>)}
           </Select>
-          <Tooltip title="Carry forward holdings & broker cash to another FY">
-            <Button icon={<ForwardOutlined />} onClick={() => setCarryModalOpen(true)}>
-              Carry Forward
-            </Button>
-          </Tooltip>
+          <Button icon={<ForwardOutlined />} onClick={() => setCarryModalOpen(true)}>
+            Carry Forward
+          </Button>
         </Space>
       </Space>
 
       {/* ── XIRR & Total Profit Hero Card ─────────────────────────────────── */}
-      <Card style={{
-        marginBottom: 20, borderRadius: 14,
-        background: 'linear-gradient(135deg, #0b1120 0%, #1e1b4b 55%, #172554 100%)',
-        border: '1px solid #312e81',
-        boxShadow: '0 10px 30px rgba(15, 23, 42, 0.16)',
-      }}>
+      <Card className="futuristic-hero" style={{ marginBottom: 20 }}>
         <Row gutter={[24, 16]} align="middle">
           <Col xs={24} md={7}>
             <Space direction="vertical" size={2}>
               <Space>
-                <PercentageOutlined style={{ color: '#60a5fa', fontSize: 18 }} />
+                <PercentageOutlined style={{ color: '#38bdf8', fontSize: 18 }} />
                 <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>PORTFOLIO XIRR</Text>
                 <Tooltip title="Annualised XIRR calculated from your broker cash deposit dates as outflows and today's Net Portfolio Value as terminal inflow.">
                   <InfoCircleOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />
@@ -451,7 +550,7 @@ export default function HomePage() {
                   : <span style={{ color: '#94a3b8', fontSize: 18 }}>Add cash to compute</span>}
               </Text>
               <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>
-                Annualised return on broker cash invested
+                Annualised return on broker cash added
               </Text>
             </Space>
           </Col>
@@ -459,7 +558,7 @@ export default function HomePage() {
           <Col xs={24} md={17}>
             <Row gutter={[16, 12]}>
               {[
-                { label: 'Real Investment (Broker Cash)', val: totalBrokerCash, color: '#f8fafc' },
+                { label: 'Broker Cash (Investment)', val: totalBrokerCash, color: '#f8fafc' },
                 {
                   label: 'Total Profit (Holdings + F&O + Int)',
                   val: totalProfit,
@@ -468,7 +567,7 @@ export default function HomePage() {
                 },
                 { label: 'Net Portfolio Value', val: netValue, color: '#fbbf24' },
                 {
-                  label: diff >= 0 ? 'Undeployed Cash in Broker' : 'Over-deployed vs Cash',
+                  label: 'Undeployed Cash (Broker - Holdings)',
                   val: diff,
                   color: diff >= 0 ? '#38bdf8' : '#fb7185',
                   signed: true,
@@ -479,7 +578,7 @@ export default function HomePage() {
                     background: 'rgba(255,255,255,0.05)',
                     padding: '10px 12px',
                     borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.09)',
                   }}>
                     <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, display: 'block' }}>
                       {s.label}
@@ -495,24 +594,25 @@ export default function HomePage() {
         </Row>
       </Card>
 
-      {/* ── 6 Enterprise Stat Cards ───────────────────────────────────────── */}
+      {/* ── 7 Enterprise Stat Cards (F&O P&L and Interest are SEPARATE) ───── */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         {[
-          { label: 'Broker Cash (Investment)', val: totalBrokerCash, cls: 'stat-card-blue', icon: <BankOutlined />, tip: 'Total cash added to your broking agency' },
-          { label: 'Holdings Invested (GSec/MF)', val: totalInvested, cls: 'stat-card-purple', icon: <PieChartOutlined />, tip: 'Cost basis of GSec & Mutual Fund holdings' },
-          { label: diff >= 0 ? 'Undeployed Broker Cash' : 'Over-invested vs Cash', val: Math.abs(diff), cls: diff >= 0 ? 'stat-card-green' : 'stat-card-red', icon: <SwapOutlined />, tip: 'Broker cash minus holdings invested' },
-          { label: 'Total Profit', val: totalProfit, cls: totalProfit >= 0 ? 'stat-card-green' : 'stat-card-red', icon: <RiseOutlined />, tip: 'Holding P&L + F&O P&L + Interest Accumulated', signed: true },
-          { label: 'Holdings P&L (GSec/MF)', val: holdingPnl, cls: holdingPnl >= 0 ? 'stat-card-green' : 'stat-card-red', icon: holdingPnl >= 0 ? <RiseOutlined /> : <FallOutlined />, tip: 'Current Value minus Invested Value for holdings', signed: true },
-          { label: 'F&O P&L + Interest', val: fnoPnl + totalInterest, cls: (fnoPnl + totalInterest) >= 0 ? 'stat-card-orange' : 'stat-card-red', icon: <DollarOutlined />, tip: `F&O: ${fmtSigned(fnoPnl)} | Interest: ${fmt(totalInterest)}`, signed: true },
+          { label: 'Broker Cash (Investment)', val: totalBrokerCash, cls: 'stat-card-blue', tip: 'Total cash added to your broking agency' },
+          { label: 'Holdings Invested (GSec/MF)', val: totalInvested, cls: 'stat-card-purple', tip: 'Qty × Buy Value across GSec & Mutual Funds' },
+          { label: 'Undeployed Cash', val: diff, cls: diff >= 0 ? 'stat-card-cyan' : 'stat-card-red', tip: 'Broker Cash minus Holdings Invested', signed: true },
+          { label: 'Total Profit', val: totalProfit, cls: totalProfit >= 0 ? 'stat-card-green' : 'stat-card-red', tip: 'Holdings P&L + F&O P&L + Interest', signed: true },
+          { label: 'Holdings P&L (GSec/MF)', val: holdingPnl, cls: holdingPnl >= 0 ? 'stat-card-green' : 'stat-card-red', tip: 'Current Value minus Invested Value', signed: true },
+          { label: 'F&O P&L (Net of Brokerage)', val: fnoPnl, cls: fnoPnl >= 0 ? 'stat-card-orange' : 'stat-card-red', tip: `After ₹${(summary?.total_brokerage ?? 0).toLocaleString('en-IN')} brokerage`, signed: true },
+          { label: 'Interest Accumulated', val: totalInterest, cls: 'stat-card-green', tip: 'Total interest / dividend credited' },
         ].map((s) => (
-          <Col xs={24} sm={12} lg={8} key={s.label}>
+          <Col xs={24} sm={12} lg={6} key={s.label}>
             <Tooltip title={s.tip}>
               <Card className={s.cls} style={{ borderRadius: 14, border: 'none' }}>
                 <Statistic
-                  title={<Text style={{ color: 'rgba(255,255,255,0.88)', fontSize: 13 }}>{s.label}</Text>}
+                  title={<Text style={{ color: 'rgba(255,255,255,0.88)', fontSize: 12 }}>{s.label}</Text>}
                   value={Math.abs(s.val)}
                   prefix={s.signed && s.val < 0 ? '- ₹' : '₹'}
-                  valueStyle={{ color: '#fff', fontSize: 21, fontWeight: 700 }}
+                  valueStyle={{ color: '#fff', fontSize: 19, fontWeight: 700 }}
                   formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 />
               </Card>
@@ -521,12 +621,62 @@ export default function HomePage() {
         ))}
       </Row>
 
-      {/* ── Cool Unique Feature: Portfolio Intelligence & Target Simulator ─── */}
+      {/* ── AI Portfolio Strategist ───────────────────────────────────────── */}
+      {aiInsights && (
+        <Card className="ai-card" style={{ marginBottom: 20 }}>
+          <Row gutter={[20, 16]} align="middle">
+            <Col xs={24} md={6} style={{ textAlign: 'center' }}>
+              <Space direction="vertical" size={4}>
+                <Space>
+                  <RobotOutlined style={{ fontSize: 20, color: '#a78bfa' }} />
+                  <Text strong style={{ color: '#e2e8f0', fontSize: 13 }}>AI STRATEGIST</Text>
+                </Space>
+                <Progress
+                  type="dashboard"
+                  percent={aiInsights.health_score}
+                  size={100}
+                  strokeColor={{ '0%': '#06b6d4', '100%': '#8b5cf6' }}
+                  trailColor="rgba(255,255,255,0.12)"
+                  format={(p) => <span style={{ color: '#fff', fontWeight: 700 }}>{p}</span>}
+                />
+                <Tag color="purple" style={{ margin: 0 }}>{aiInsights.headline}</Tag>
+              </Space>
+            </Col>
+            <Col xs={24} md={18}>
+              <Row gutter={[12, 12]}>
+                {aiInsights.suggestions.map((s, idx) => (
+                  <Col xs={24} sm={12} key={idx}>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid rgba(167,139,250,0.25)',
+                      borderRadius: 10,
+                      padding: '10px 12px',
+                      height: '100%',
+                    }}>
+                      <Space size={6} style={{ marginBottom: 4 }}>
+                        {s.type === 'success' ? <CheckCircleOutlined style={{ color: '#34d399' }} />
+                          : s.type === 'warning' ? <WarningOutlined style={{ color: '#fbbf24' }} />
+                          : <InfoCircleOutlined style={{ color: '#38bdf8' }} />}
+                        <Text strong style={{ color: '#f8fafc', fontSize: 12 }}>{s.title}</Text>
+                      </Space>
+                      <Text style={{ color: 'rgba(226,232,240,0.78)', fontSize: 12, display: 'block' }}>
+                        {s.detail}
+                      </Text>
+                    </div>
+                  </Col>
+                ))}
+              </Row>
+            </Col>
+          </Row>
+        </Card>
+      )}
+
+      {/* ── Capital Allocation & Interactive Target Simulator ─────────────── */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         <Col xs={24} lg={12}>
           <Card
             className="enterprise-card"
-            title={<Space><PieChartOutlined style={{ color: '#4361ee' }} /><span>Capital Allocation &amp; Profit Attribution</span></Space>}
+            title={<Space><PieChartOutlined style={{ color: '#4f46e5' }} /><span>Capital Allocation &amp; Profit Attribution</span></Space>}
             style={{ height: '100%' }}
           >
             <Space direction="vertical" style={{ width: '100%' }} size={14}>
@@ -549,7 +699,7 @@ export default function HomePage() {
                   <Text strong style={{ fontSize: 12 }}>Undeployed Cash / F&amp;O Margin</Text>
                   <Text className="num-tabular" style={{ fontSize: 12 }}>{fmt(Math.max(0, diff))} ({((Math.max(0, diff) / cashBase) * 100).toFixed(1)}%)</Text>
                 </Space>
-                <Progress percent={Math.min(100, Number(((Math.max(0, diff) / cashBase) * 100).toFixed(1)))} strokeColor="#10b981" showInfo={false} />
+                <Progress percent={Math.min(100, Number(((Math.max(0, diff) / cashBase) * 100).toFixed(1)))} strokeColor="#06b6d4" showInfo={false} />
               </div>
               <Row gutter={8} style={{ paddingTop: 6 }}>
                 <Col span={8}>
@@ -628,46 +778,99 @@ export default function HomePage() {
 
       {/* ── Add Forms ─────────────────────────────────────────────────────── */}
       <Collapse defaultActiveKey={['broker_cash', 'investment']} style={{ marginBottom: 20 }}>
-        <Panel header="💰 Add Cash to Broking Agency (Real Investment)" key="broker_cash">
-          <Form form={cashForm} layout="inline" onFinish={addCash}>
-            <Form.Item name="amount" rules={[{ required: true, message: 'Enter amount' }]}>
-              <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 180 }} min={1} step={1000} />
-            </Form.Item>
-            <Form.Item name="cash_date" rules={[{ required: true, message: 'Select date' }]}>
-              <DatePicker placeholder="Date added" />
-            </Form.Item>
-            <Form.Item name="description">
-              <Input placeholder="Description (optional)" style={{ width: 220 }} />
-            </Form.Item>
-            <Form.Item>
-              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Cash</Button>
-            </Form.Item>
+        <Panel header="💰 Add Cash to Broking Agency (Manual or CSV Upload)" key="broker_cash">
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            <Form form={cashForm} layout="inline" onFinish={addCash}>
+              <Form.Item name="amount" rules={[{ required: true, message: 'Enter amount' }]}>
+                <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 170 }} min={1} step={1000} />
+              </Form.Item>
+              <Form.Item name="cash_date" rules={[{ required: true, message: 'Select date' }]}>
+                <DatePicker placeholder="Date added" />
+              </Form.Item>
+              <Form.Item name="description">
+                <Input placeholder="Description (optional)" style={{ width: 200 }} />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Cash</Button>
+              </Form.Item>
+              <Form.Item>
+                <Upload accept=".csv" showUploadList={false} beforeUpload={handleCashCsvUpload}>
+                  <Button icon={<UploadOutlined />}>Upload Cash CSV</Button>
+                </Upload>
+              </Form.Item>
+            </Form>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              CSV format: <code>Date,Amount</code> (e.g. <code>2026-08-18,80000</code>). Financial year is auto-detected from Date.
+            </Text>
+          </Space>
+        </Panel>
+
+        <Panel header="🏛️ Add Holding (GSec / Mutual Fund Only)" key="investment">
+          <Form form={invForm} layout="vertical" onFinish={addHolding}>
+            <Row gutter={[12, 8]} align="bottom">
+              <Col xs={12} sm={4}>
+                <Form.Item name="instrument_type" label="Instrument" rules={[{ required: true }]}>
+                  <Select placeholder="Type">
+                    {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={12} sm={5}>
+                <Form.Item name="instrument_code" label="Instrument Code">
+                  <Input
+                    placeholder="e.g. 119551 / GOLDBEES.NS"
+                    addonAfter={
+                      <Tooltip title="Fetch Live LTP / NAV">
+                        <SyncOutlined
+                          spin={fetchingSingleLtp}
+                          onClick={() => fetchLtpForForm(invForm)}
+                          style={{ cursor: 'pointer', color: '#4f46e5' }}
+                        />
+                      </Tooltip>
+                    }
+                  />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={5}>
+                <Form.Item name="name" label="Name" rules={[{ required: true }]}>
+                  <Input placeholder="Scheme / Bond Name" />
+                </Form.Item>
+              </Col>
+              <Col xs={8} sm={3}>
+                <Form.Item name="quantity" label="Qty" initialValue={1} rules={[{ required: true }]}>
+                  <InputNumber min={0.0001} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={8} sm={3}>
+                <Form.Item name="buy_price" label="Buy Value" rules={[{ required: true }]}>
+                  <InputNumber min={0.01} prefix="₹" style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={8} sm={2}>
+                <Form.Item name="ltp" label="LTP">
+                  <InputNumber min={0} prefix="₹" style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={2}>
+                <Form.Item>
+                  <Button type="primary" htmlType="submit" icon={<PlusOutlined />} block>Add</Button>
+                </Form.Item>
+              </Col>
+            </Row>
+            <Space size={16}>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Auto Invested: <Text strong>{fmt(Number(addQty || 0) * Number(addBuy || 0))}</Text>
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Auto Current Value: <Text strong style={{ color: '#2563eb' }}>
+                  {addLtp != null ? fmt(Number(addQty || 0) * Number(addLtp)) : '—'}
+                </Text>
+              </Text>
+            </Space>
           </Form>
         </Panel>
 
-        <Panel header="🏛️ Add Holding (GSec / Mutual Fund)" key="investment">
-          <Form form={invForm} layout="inline" onFinish={addHolding}>
-            <Form.Item name="instrument_type" rules={[{ required: true, message: 'Select type' }]}>
-              <Select placeholder="Type" style={{ width: 150 }}>
-                {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
-              </Select>
-            </Form.Item>
-            <Form.Item name="name" rules={[{ required: true, message: 'Enter name' }]}>
-              <Input placeholder="Name / Scheme" style={{ width: 200 }} />
-            </Form.Item>
-            <Form.Item name="invested_value" rules={[{ required: true, message: 'Enter invested' }]}>
-              <InputNumber placeholder="Invested (₹)" prefix="₹" style={{ width: 160 }} min={1} />
-            </Form.Item>
-            <Form.Item name="current_value">
-              <InputNumber placeholder="Current Value (₹)" prefix="₹" style={{ width: 170 }} min={0} />
-            </Form.Item>
-            <Form.Item>
-              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Holding</Button>
-            </Form.Item>
-          </Form>
-        </Panel>
-
-        <Panel header="➕ Add Interest / Returns Accumulated" key="interest">
+        <Panel header="➕ Add Interest Accumulated" key="interest">
           <Form form={intForm} layout="inline" onFinish={addInterest}>
             <Form.Item name="amount" rules={[{ required: true }]}>
               <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 160 }} min={1} />
@@ -691,7 +894,7 @@ export default function HomePage() {
         title={<Space><BankOutlined style={{ color: '#2563eb' }} /><span>All Broker Cash Entries</span><Tag color="blue">{brokerCash.length} entries • {fmt(totalBrokerCash)}</Tag></Space>}
         style={{ marginBottom: 20 }}
       >
-        <Table dataSource={brokerCash} columns={cashColumns} rowKey="id" size="small" pagination={false}
+        <Table dataSource={brokerCash} columns={cashColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 640 }}
           summary={() => (
             <Table.Summary.Row>
               <Table.Summary.Cell index={0} align="right"><Text strong>{fmt(totalBrokerCash)}</Text></Table.Summary.Cell>
@@ -708,40 +911,44 @@ export default function HomePage() {
         title={
           <Space wrap>
             <span>Holdings (GSec &amp; Mutual Funds)</span>
-            <Tag color="blue">Invested: {fmt(totalInvested)}</Tag>
+            <Tag color="purple">Invested: {fmt(totalInvested)}</Tag>
             <Tag color={holdingPnl >= 0 ? 'green' : 'red'}>Holding P&amp;L: {fmtSigned(holdingPnl)}</Tag>
-            <Tag color={diff >= 0 ? 'cyan' : 'red'}>
-              {diff >= 0 ? `Undeployed Cash: ${fmt(diff)}` : `Over-invested: ${fmt(Math.abs(diff))}`}
-            </Tag>
+            <Tag color={diff >= 0 ? 'cyan' : 'red'}>Undeployed Cash: {fmtSigned(diff)}</Tag>
           </Space>
+        }
+        extra={
+          <Button
+            size="small" icon={<SyncOutlined spin={ltpRefreshing} />}
+            loading={ltpRefreshing} onClick={refreshAllHoldingsLtp}
+          >
+            Refresh Live LTPs
+          </Button>
         }
         style={{ marginBottom: 20 }}
       >
-        <Table dataSource={investments} columns={holdingColumns} rowKey="id" size="small" pagination={false}
+        <Table dataSource={investments} columns={holdingColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 960 }}
           summary={() => {
             const totalCv = investments.reduce((s, r) => r.current_value != null ? s + Number(r.current_value) : s, 0)
             return (
               <Table.Summary.Row>
-                <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total Holdings</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={2} align="right"><Text strong>{fmt(totalInvested)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={3} align="right">
+                <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total Holdings</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={6} align="right"><Text strong>{fmt(totalInvested)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={7} align="right">
                   <Text strong style={{ color: '#2563eb' }}>{totalCv > 0 ? fmt(totalCv) : '—'}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={4} align="right">
-                  <Text strong style={{ color: holdingPnl >= 0 ? '#10b981' : '#ef4444' }}>
-                    {fmtSigned(holdingPnl)}
-                  </Text>
+                <Table.Summary.Cell index={8} align="right">
+                  <Text strong style={{ color: holdingPnl >= 0 ? '#10b981' : '#ef4444' }}>{fmtSigned(holdingPnl)}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={5} />
+                <Table.Summary.Cell index={9} />
               </Table.Summary.Row>
             )
           }}
         />
       </Card>
 
-      {/* ── Interest Table ────────────────────────────────────────────────── */}
+      {/* ── Interest Accumulated Table (with Edit + Delete) ───────────────── */}
       <Card className="enterprise-card" title="Interest Accumulated">
-        <Table dataSource={interests} columns={intColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
+        <Table dataSource={interests} columns={intColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} scroll={{ x: 600 }} />
       </Card>
 
       {/* ── Edit Holding Modal ────────────────────────────────────────────── */}
@@ -753,20 +960,41 @@ export default function HomePage() {
         okText="Save Changes"
       >
         <Form form={editHoldingForm} layout="vertical" onFinish={saveEditHolding}>
-          <Form.Item name="instrument_type" label="Type" rules={[{ required: true }]}>
-            <Select>
-              {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
-            </Select>
+          <Form.Item name="instrument_type" label="Instrument" rules={[{ required: true }]}>
+            <Select>{HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}</Select>
           </Form.Item>
-          <Form.Item name="name" label="Name / Scheme" rules={[{ required: true }]}>
+          <Form.Item name="instrument_code" label="Instrument Code">
+            <Input
+              placeholder="e.g. 119551 or GOLDBEES.NS"
+              addonAfter={
+                <SyncOutlined
+                  spin={fetchingSingleLtp}
+                  onClick={() => fetchLtpForForm(editHoldingForm)}
+                  style={{ cursor: 'pointer', color: '#4f46e5' }}
+                />
+              }
+            />
+          </Form.Item>
+          <Form.Item name="name" label="Name" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="invested_value" label="Invested Value (₹)" rules={[{ required: true }]}>
-            <InputNumber min={1} prefix="₹" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="current_value" label="Current Value (₹)">
-            <InputNumber min={0} prefix="₹" style={{ width: '100%' }} placeholder="Enter current market value" />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="quantity" label="Qty" rules={[{ required: true }]}>
+                <InputNumber min={0.0001} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="buy_price" label="Buy Value (₹)" rules={[{ required: true }]}>
+                <InputNumber min={0.01} prefix="₹" style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="ltp" label="LTP (₹)">
+                <InputNumber min={0} prefix="₹" style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 
@@ -791,9 +1019,30 @@ export default function HomePage() {
         </Form>
       </Modal>
 
+      {/* ── Edit Interest Modal ───────────────────────────────────────────── */}
+      <Modal
+        title="Edit Interest Entry"
+        open={editIntOpen}
+        onCancel={() => setEditIntOpen(false)}
+        onOk={() => editIntForm.submit()}
+        okText="Save Changes"
+      >
+        <Form form={editIntForm} layout="vertical" onFinish={saveEditInterest}>
+          <Form.Item name="amount" label="Amount (₹)" rules={[{ required: true }]}>
+            <InputNumber min={1} prefix="₹" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="interest_date" label="Date" rules={[{ required: true }]}>
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* ── Carry Forward Modal ───────────────────────────────────────────── */}
       <Modal
-        title="📦 Carry Forward Holdings &amp; Cash to Next FY"
+        title="📦 Carry Forward Holdings & Cash to Next FY"
         open={carryModalOpen}
         onCancel={() => setCarryModalOpen(false)}
         footer={null}
@@ -810,9 +1059,7 @@ export default function HomePage() {
               Carry Forward Holdings &amp; Cash
             </Button>
           </Form.Item>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            Duplicates are automatically skipped. Targets will be recalculated automatically.
-          </Text>
+          <Alert type="info" showIcon message="Only GSec & Mutual Fund holdings and Broker Cash are carried forward." />
         </Form>
       </Modal>
     </Spin>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
-import { Card, Form, Input, Button, Typography, Tabs, message, Space } from 'antd'
-import { UserOutlined, LockOutlined, MailOutlined, StockOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import { Card, Form, Input, Button, Typography, message, Space, Alert } from 'antd'
+import { UserOutlined, LockOutlined, StockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { authApi } from '@/services/api'
 import { useAuthStore } from '@/store/authStore'
 
@@ -11,7 +11,6 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { setTokens, setUser } = useAuthStore()
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState('login')
 
   async function handleLogin(values: { username: string; password: string }) {
     setLoading(true)
@@ -29,90 +28,55 @@ export default function LoginPage() {
     }
   }
 
-  async function handleRegister(values: {
-    username: string; email: string; password: string; full_name?: string
-  }) {
-    setLoading(true)
-    try {
-      await authApi.register(values)
-      message.success('Account created! Please log in.')
-      setActiveTab('login')
-    } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'Registration failed')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(135deg, #050816 0%, #1e1b4b 55%, #0f172a 100%)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 24,
     }}>
-      <Card style={{ width: 420, borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-        {/* Logo */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Space direction="vertical" size={4}>
-            <StockOutlined style={{ fontSize: 48, color: '#4361ee' }} />
-            <Title level={2} style={{ margin: 0, color: '#1a1a2e' }}>FO Tracker</Title>
-            <Text type="secondary">Business Portfolio Management</Text>
+      <Card style={{
+        width: 420, borderRadius: 18,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.45)',
+        border: '1px solid rgba(99,102,241,0.3)',
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+          <Space direction="vertical" size={6}>
+            <div style={{
+              width: 56, height: 56, borderRadius: 14, margin: '0 auto',
+              background: 'linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 8px 24px rgba(79,70,229,0.4)',
+            }}>
+              <StockOutlined style={{ fontSize: 28, color: '#fff' }} />
+            </div>
+            <Title level={2} style={{ margin: 0, color: '#0f172a' }}>FO Tracker</Title>
+            <Text type="secondary">Enterprise Quant Portfolio Terminal</Text>
           </Space>
         </div>
 
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          centered
-          items={[
-            {
-              key: 'login',
-              label: 'Sign In',
-              children: (
-                <Form layout="vertical" onFinish={handleLogin} size="large">
-                  <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
-                    <Input prefix={<UserOutlined />} placeholder="Username" />
-                  </Form.Item>
-                  <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
-                    <Input.Password prefix={<LockOutlined />} placeholder="Password" />
-                  </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" htmlType="submit" block loading={loading}
-                      style={{ height: 44, fontSize: 15 }}>
-                      Sign In
-                    </Button>
-                  </Form.Item>
-                </Form>
-              ),
-            },
-            {
-              key: 'register',
-              label: 'Register',
-              children: (
-                <Form layout="vertical" onFinish={handleRegister} size="large">
-                  <Form.Item name="full_name">
-                    <Input prefix={<UserOutlined />} placeholder="Full Name (optional)" />
-                  </Form.Item>
-                  <Form.Item name="username" rules={[{ required: true, message: 'Choose a username' }]}>
-                    <Input prefix={<UserOutlined />} placeholder="Username" />
-                  </Form.Item>
-                  <Form.Item name="email" rules={[{ required: true, type: 'email', message: 'Valid email required' }]}>
-                    <Input prefix={<MailOutlined />} placeholder="Email" />
-                  </Form.Item>
-                  <Form.Item name="password" rules={[{ required: true, min: 8, message: 'Min 8 characters' }]}>
-                    <Input.Password prefix={<LockOutlined />} placeholder="Password (min 8 chars)" />
-                  </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" htmlType="submit" block loading={loading}
-                      style={{ height: 44, fontSize: 15 }}>
-                      Create Account
-                    </Button>
-                  </Form.Item>
-                </Form>
-              ),
-            },
-          ]}
+        <Form layout="vertical" onFinish={handleLogin} size="large">
+          <Form.Item name="username" rules={[{ required: true, message: 'Enter username' }]}>
+            <Input prefix={<UserOutlined />} placeholder="Username" />
+          </Form.Item>
+          <Form.Item name="password" rules={[{ required: true, message: 'Enter password' }]}>
+            <Input.Password prefix={<LockOutlined />} placeholder="Password" />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" block loading={loading}
+              style={{ height: 44, fontSize: 15, fontWeight: 600 }}>
+              Sign In
+            </Button>
+          </Form.Item>
+        </Form>
+
+        <Alert
+          type="info"
+          showIcon
+          icon={<SafetyCertificateOutlined />}
+          message="Invite-Only Access"
+          description="Public registration is disabled. Contact an Admin for a 10-minute registration link."
+          style={{ borderRadius: 10 }}
         />
       </Card>
     </div>

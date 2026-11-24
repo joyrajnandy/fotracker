@@ -24,15 +24,20 @@ export default api
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export const authApi = {
-  register: (data: { username: string; email: string; password: string; full_name?: string }) =>
-    api.post('/auth/register', data),
+  register: (data: {
+    username: string; email: string; password: string; full_name?: string; invite_token: string
+  }) => api.post('/auth/register', data),
   login: (data: { username: string; password: string }) => api.post('/auth/login', data),
   me: () => api.get('/auth/me'),
+  createInviteLink: () => api.post('/auth/invite-link'),
+  validateInvite: (token: string) => api.get('/auth/invite-validate', { params: { token } }),
 }
 
 // ── Market ────────────────────────────────────────────────────────────────────
 export const marketApi = {
   getIndices: () => api.get('/market/indices'),
+  getLtp: (instrument_code: string, instrument_type?: string) =>
+    api.get('/market/ltp', { params: { instrument_code, instrument_type } }),
 }
 
 // ── Home ──────────────────────────────────────────────────────────────────────
@@ -43,9 +48,11 @@ export const homeApi = {
   updateInvestment: (id: number, data: object) => api.put(`/home/investment/${id}`, data),
   getInvestments: (fy?: string) => api.get('/home/investments', { params: { financial_year: fy } }),
   deleteInvestment: (id: number) => api.delete(`/home/investment/${id}`),
-  patchCurrentValue: (id: number, current_value: number | null) =>
-    api.patch(`/home/investment/${id}/current-value`, { current_value }),
+  refreshAllLtp: (fy?: string) =>
+    api.post('/home/investments/refresh-ltp', null, { params: { financial_year: fy } }),
   addInterest: (data: object) => api.post('/home/interest', data),
+  updateInterest: (id: number, data: object) => api.put(`/home/interest/${id}`, data),
+  deleteInterest: (id: number) => api.delete(`/home/interest/${id}`),
   getInterests: (fy?: string) => api.get('/home/interests', { params: { financial_year: fy } }),
   carryForward: (from_fy: string, to_fy: string) =>
     api.post('/home/carry-forward', null, { params: { from_fy, to_fy } }),
@@ -58,6 +65,11 @@ export const brokerCashApi = {
   update: (id: number, data: object) => api.put(`/broker-cash/${id}`, data),
   delete: (id: number, fy?: string) =>
     api.delete(`/broker-cash/${id}`, { params: { financial_year: fy } }),
+  uploadCsv: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/broker-cash/upload', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 }
 
 // ── TradeBook ─────────────────────────────────────────────────────────────────
@@ -75,6 +87,8 @@ export const tradebookApi = {
 // ── P&L ──────────────────────────────────────────────────────────────────────
 export const pnlApi = {
   getSummary: (fy?: string) => api.get('/pnl/summary', { params: { financial_year: fy } }),
+  updateBrokerage: (fy: string, custom_total_brokerage: number | null, per_trade_fee = 69) =>
+    api.put('/pnl/brokerage', { custom_total_brokerage, per_trade_fee }, { params: { financial_year: fy } }),
 }
 
 // ── Target ───────────────────────────────────────────────────────────────────
@@ -82,4 +96,9 @@ export const targetApi = {
   getAchievement: (fy?: string) => api.get('/target/achievement', { params: { financial_year: fy } }),
   recalculate: (fy?: string) =>
     api.post('/target/recalculate', null, { params: { financial_year: fy } }),
+}
+
+// ── AI Strategist ─────────────────────────────────────────────────────────────
+export const aiApi = {
+  getInsights: (fy?: string) => api.get('/ai/insights', { params: { financial_year: fy } }),
 }
