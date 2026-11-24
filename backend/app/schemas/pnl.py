@@ -17,6 +17,16 @@ class PnLByExpiry(BaseModel):
     status: str   # profit / loss / breakeven
 
 
+class OpenPosition(BaseModel):
+    symbol: str
+    symbol_base: str
+    expiry_date: Optional[date]
+    net_qty: float          # +ve = Long, -ve = Short
+    avg_price: float
+    open_value: float       # net cashflow of open leg (buy_cost - sell_proceeds, or signed)
+    unrealised_pnl: float   # current_value - cost (0 until live price / exit)
+
+
 class PnLSummary(BaseModel):
     total_profit: float
     total_loss: float
@@ -31,3 +41,5 @@ class PnLSummary(BaseModel):
     losing_expiries: int
     financial_year: str
     by_expiry: List[PnLByExpiry]
+    open_positions: List[OpenPosition] = []
+    total_unrealised_pnl: float = 0.0

@@ -137,6 +137,16 @@ export interface PnLByExpiry {
   status: 'profit' | 'loss' | 'breakeven'
 }
 
+export interface OpenPosition {
+  symbol: string
+  symbol_base: string
+  expiry_date: string | null
+  net_qty: number
+  avg_price: number
+  open_value: number
+  unrealised_pnl: number
+}
+
 export interface PnLSummary {
   total_profit: number
   total_loss: number
@@ -151,6 +161,8 @@ export interface PnLSummary {
   losing_expiries: number
   financial_year: string
   by_expiry: PnLByExpiry[]
+  open_positions?: OpenPosition[]
+  total_unrealised_pnl?: number
 }
 
 export interface PeriodRow {

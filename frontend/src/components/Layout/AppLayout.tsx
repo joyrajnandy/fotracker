@@ -13,20 +13,24 @@ import {
   LinkOutlined,
   CopyOutlined,
   MenuOutlined,
+  TeamOutlined,
+  BankOutlined,
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/services/api'
+import MarketBot from '@/components/MarketBot/MarketBot'
 import type { MenuProps } from 'antd'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
 const { useBreakpoint } = Grid
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { key: '/home',      icon: <HomeOutlined />,          label: 'Portfolio Home' },
   { key: '/tradebook', icon: <UnorderedListOutlined />, label: 'Trade Book' },
   { key: '/pnl',       icon: <FundOutlined />,          label: 'P & L Analytics' },
   { key: '/target',    icon: <AimOutlined />,           label: 'Targets' },
+  { key: '/gsec',      icon: <BankOutlined />,          label: 'GSec Bonds' },
 ]
 
 export default function AppLayout() {
@@ -36,6 +40,9 @@ export default function AppLayout() {
   const isDesktop = !!screens.lg
 
   const { user, logout } = useAuthStore()
+  const NAV_ITEMS = user?.is_admin
+    ? [...BASE_NAV_ITEMS, { key: '/users', icon: <TeamOutlined />, label: 'Users (Admin)' }]
+    : BASE_NAV_ITEMS
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [inviteUrl, setInviteUrl] = useState('')
@@ -220,6 +227,8 @@ export default function AppLayout() {
           <Outlet />
         </Content>
       </Layout>
+
+      <MarketBot />
 
       <Modal
         title="🔐 Admin Registration Invite (Valid 10 Minutes)"

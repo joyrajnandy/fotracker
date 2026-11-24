@@ -31,13 +31,17 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   createInviteLink: () => api.post('/auth/invite-link'),
   validateInvite: (token: string) => api.get('/auth/invite-validate', { params: { token } }),
+  listUsers: () => api.get('/auth/users'),
+  toggleUserStatus: (userId: number, is_active: boolean) =>
+    api.patch(`/auth/users/${userId}/status`, { is_active }),
 }
 
 // ── Market ────────────────────────────────────────────────────────────────────
 export const marketApi = {
   getIndices: () => api.get('/market/indices'),
-  getLtp: (instrument_code: string, instrument_type?: string) =>
-    api.get('/market/ltp', { params: { instrument_code, instrument_type } }),
+  getLtp: (instrument_code: string, instrument_type?: string, name?: string) =>
+    api.get('/market/ltp', { params: { instrument_code, instrument_type, name } }),
+  getGsec: (fy?: string) => api.get('/market/gsec', { params: { financial_year: fy } }),
 }
 
 // ── Home ──────────────────────────────────────────────────────────────────────
@@ -82,12 +86,14 @@ export const tradebookApi = {
   getTrades: (params: {
     financial_year?: string; page?: number; page_size?: number; symbol?: string; trade_type?: string
   }) => api.get('/tradebook/trades', { params }),
+  deleteTrades: (fy?: string) =>
+    api.delete('/tradebook/trades', { params: { financial_year: fy } }),
 }
 
 // ── P&L ──────────────────────────────────────────────────────────────────────
 export const pnlApi = {
   getSummary: (fy?: string) => api.get('/pnl/summary', { params: { financial_year: fy } }),
-  updateBrokerage: (fy: string, custom_total_brokerage: number | null, per_trade_fee = 69) =>
+  updateBrokerage: (fy: string, custom_total_brokerage: number | null, per_trade_fee = 25.7) =>
     api.put('/pnl/brokerage', { custom_total_brokerage, per_trade_fee }, { params: { financial_year: fy } }),
 }
 
@@ -101,4 +107,5 @@ export const targetApi = {
 // ── AI Strategist ─────────────────────────────────────────────────────────────
 export const aiApi = {
   getInsights: (fy?: string) => api.get('/ai/insights', { params: { financial_year: fy } }),
+  getMarketBot: (fy?: string) => api.get('/ai/market-bot', { params: { financial_year: fy } }),
 }

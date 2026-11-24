@@ -8,10 +8,17 @@ import HomePage from '@/pages/Home/Home'
 import TradeBookPage from '@/pages/TradeBook/TradeBook'
 import PnLPage from '@/pages/PnL/PnL'
 import TargetPage from '@/pages/Target/Target'
+import GSecPage from '@/pages/GSec/GSec'
+import UsersPage from '@/pages/Admin/Users'
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated())
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((s) => s.user)
+  return user?.is_admin ? <>{children}</> : <Navigate to="/home" replace />
 }
 
 export default function App() {
@@ -50,6 +57,8 @@ export default function App() {
             <Route path="tradebook" element={<TradeBookPage />} />
             <Route path="pnl" element={<PnLPage />} />
             <Route path="target" element={<TargetPage />} />
+            <Route path="gsec" element={<GSecPage />} />
+            <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

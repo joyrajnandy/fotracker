@@ -17,6 +17,7 @@ import {
 } from 'recharts'
 import dayjs from 'dayjs'
 import { homeApi, brokerCashApi, marketApi, aiApi } from '@/services/api'
+import { useAuthStore } from '@/store/authStore'
 import type { HomeSummary, Investment, Interest, BrokerCash, MarketIndex, AIInsights } from '@/types'
 
 const { Title, Text } = Typography
@@ -81,6 +82,21 @@ export default function HomePage() {
   }, [])
 
   useEffect(() => {
+    const token = useAuthStore.getState().accessToken
+    if (token && typeof EventSource !== 'undefined') {
+      const es = new EventSource(`/api/v1/market/stream?token=${encodeURIComponent(token)}`)
+      es.onmessage = (ev) => {
+        try {
+          const parsed = JSON.parse(ev.data)
+          if (parsed?.indices) setIndices(parsed.indices)
+        } catch { /* ignore */ }
+      }
+      es.onerror = () => {
+        es.close()
+        fetchMarket()
+      }
+      return () => es.close()
+    }
     fetchMarket()
     const timer = setInterval(fetchMarket, 30000)
     return () => clearInterval(timer)
@@ -119,16 +135,21 @@ export default function HomePage() {
   // ── Live LTP helpers ──────────────────────────────────────────────────────
   async function fetchLtpForForm(formInstance: any) {
     const code = formInstance.getFieldValue('instrument_code')
+    const name = formInstance.getFieldValue('name')
     const type = formInstance.getFieldValue('instrument_type')
-    if (!code) {
-      message.warning('Enter an Instrument Code first (e.g. AMFI code 119551 or GOLDBEES.NS)')
+    const queryCode = code || name
+    if (!queryCode) {
+      message.warning('Enter an Instrument Code or Name first (e.g. AMFI code 119551 or GOLDBEES.NS)')
       return
     }
     setFetchingSingleLtp(true)
     try {
-      const { data } = await marketApi.getLtp(code, type)
+      const { data } = await marketApi.getLtp(queryCode, type, name)
       formInstance.setFieldValue('ltp', data.ltp)
-      if (!formInstance.getFieldValue('name') && data.name) {
+      if (!code && data.matched_code) {
+        formInstance.setFieldValue('instrument_code', data.matched_code)
+      }
+      if (!name && data.name) {
         formInstance.setFieldValue('name', data.name)
       }
       message.success(`Live LTP fetched from ${data.source}: ₹${data.ltp}`)
@@ -143,7 +164,10 @@ export default function HomePage() {
     setLtpRefreshing(true)
     try {
       const { data } = await homeApi.refreshAllLtp(fy)
-      message.success(`Updated live LTP for ${data.updated} holding(s)`)
+      message.success(`Updated live LTP for ${data.updated} of ${data.total} holding(s)`)
+      if (data.failed?.length) {
+        message.warning(`Could not match LTP for: ${data.failed.join(', ')}. Add AMFI code or NSE/BSE ticker.`)
+      }
       refreshData()
     } catch {
       message.error('Failed to refresh LTPs')
@@ -360,44 +384,61 @@ export default function HomePage() {
     .reduce((s, r) => s + Number(r.invested_value), 0)
   const cashBase = totalBrokerCash > 0 ? totalBrokerCash : Math.max(totalInvested, 1)
 
-  // ── Table Columns ─────────────────────────────────────────────────────────
+  // ── Table Columns (all sortable) ──────────────────────────────────────────
   const holdingColumns = [
     {
       title: 'Instrument', dataIndex: 'instrument_type', key: 'type', width: 120,
+      sorter: (a: Investment, b: Investment) => a.instrument_type.localeCompare(b.instrument_type),
       render: (v: string) => <Tag color={v === 'GSec' ? 'geekblue' : 'purple'} style={{ fontWeight: 600 }}>{v}</Tag>,
     },
     {
       title: 'Code', dataIndex: 'instrument_code', key: 'code', width: 110,
+      sorter: (a: Investment, b: Investment) => (a.instrument_code || '').localeCompare(b.instrument_code || ''),
       render: (v: string | null) => v ? <Tag>{v}</Tag> : <Text type="secondary">—</Text>,
     },
-    { title: 'Name', dataIndex: 'name', key: 'name', render: (v: string) => <Text strong>{v}</Text> },
+    {
+      title: 'Name', dataIndex: 'name', key: 'name',
+      sorter: (a: Investment, b: Investment) => a.name.localeCompare(b.name),
+      render: (v: string) => <Text strong>{v}</Text>,
+    },
     {
       title: 'Qty', dataIndex: 'quantity', key: 'qty', align: 'right' as const, width: 90,
+      sorter: (a: Investment, b: Investment) => Number(a.quantity ?? 1) - Number(b.quantity ?? 1),
       render: (v: number | null) => (v != null ? Number(v).toLocaleString('en-IN', { maximumFractionDigits: 4 }) : '1'),
     },
     {
       title: 'Buy Value', dataIndex: 'buy_price', key: 'buy', align: 'right' as const, width: 110,
+      sorter: (a: Investment, b: Investment) => Number(a.buy_price ?? a.invested_value) - Number(b.buy_price ?? b.invested_value),
       render: (v: number | null, row: Investment) => fmt(Number(v ?? row.invested_value)),
     },
     {
       title: 'LTP', dataIndex: 'ltp', key: 'ltp', align: 'right' as const, width: 110,
+      sorter: (a: Investment, b: Investment) => Number(a.ltp ?? 0) - Number(b.ltp ?? 0),
       render: (v: number | null) => (
         <Text style={{ color: v != null ? '#2563eb' : '#94a3b8' }}>{v != null ? fmt(Number(v)) : '—'}</Text>
       ),
     },
     {
       title: 'Invested (Qty×Buy)', dataIndex: 'invested_value', key: 'invested',
-      align: 'right' as const, render: (v: number) => <Text strong>{fmt(v)}</Text>,
+      align: 'right' as const,
+      sorter: (a: Investment, b: Investment) => Number(a.invested_value) - Number(b.invested_value),
+      render: (v: number) => <Text strong>{fmt(v)}</Text>,
     },
     {
       title: 'Current Value (Qty×LTP)', dataIndex: 'current_value', key: 'cv',
       align: 'right' as const,
+      sorter: (a: Investment, b: Investment) => Number(a.current_value ?? 0) - Number(b.current_value ?? 0),
       render: (v: number | null) => (
         <Text strong style={{ color: v != null ? '#2563eb' : '#94a3b8' }}>{v != null ? fmt(v) : '—'}</Text>
       ),
     },
     {
       title: 'Holding P&L', key: 'holding_pnl', align: 'right' as const,
+      sorter: (a: Investment, b: Investment) => {
+        const pa = a.current_value != null ? Number(a.current_value) - Number(a.invested_value) : 0
+        const pb = b.current_value != null ? Number(b.current_value) - Number(b.invested_value) : 0
+        return pa - pb
+      },
       render: (_: any, row: Investment) => {
         if (row.current_value == null) return <Text type="secondary">—</Text>
         const pnl = Number(row.current_value) - Number(row.invested_value)
@@ -420,10 +461,19 @@ export default function HomePage() {
   const cashColumns = [
     {
       title: 'Cash Added (₹)', dataIndex: 'amount', key: 'amount',
-      align: 'right' as const, render: (v: number) => <Text strong>{fmt(v)}</Text>,
+      align: 'right' as const,
+      sorter: (a: BrokerCash, b: BrokerCash) => Number(a.amount) - Number(b.amount),
+      render: (v: number) => <Text strong>{fmt(v)}</Text>,
     },
-    { title: 'Date Added', dataIndex: 'cash_date', key: 'date', width: 140 },
-    { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
+    {
+      title: 'Date Added', dataIndex: 'cash_date', key: 'date', width: 140,
+      sorter: (a: BrokerCash, b: BrokerCash) => a.cash_date.localeCompare(b.cash_date),
+    },
+    {
+      title: 'Description', dataIndex: 'description', key: 'desc',
+      sorter: (a: BrokerCash, b: BrokerCash) => (a.description || '').localeCompare(b.description || ''),
+      render: (v: string) => v || '—',
+    },
     {
       title: 'Actions', key: 'action', width: 100, align: 'center' as const,
       render: (_: any, row: BrokerCash) => (
@@ -436,9 +486,21 @@ export default function HomePage() {
   ]
 
   const intColumns = [
-    { title: 'Amount (₹)', dataIndex: 'amount', key: 'amount', render: (v: number) => fmt(v), align: 'right' as const },
-    { title: 'Date', dataIndex: 'interest_date', key: 'date', width: 140 },
-    { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
+    {
+      title: 'Amount (₹)', dataIndex: 'amount', key: 'amount',
+      align: 'right' as const,
+      sorter: (a: Interest, b: Interest) => Number(a.amount) - Number(b.amount),
+      render: (v: number) => fmt(v),
+    },
+    {
+      title: 'Date', dataIndex: 'interest_date', key: 'date', width: 140,
+      sorter: (a: Interest, b: Interest) => a.interest_date.localeCompare(b.interest_date),
+    },
+    {
+      title: 'Description', dataIndex: 'description', key: 'desc',
+      sorter: (a: Interest, b: Interest) => (a.description || '').localeCompare(b.description || ''),
+      render: (v: string) => v || '—',
+    },
     {
       title: 'Actions', key: 'action', width: 100, align: 'center' as const,
       render: (_: any, row: Interest) => (
@@ -776,8 +838,8 @@ export default function HomePage() {
         )}
       </Card>
 
-      {/* ── Add Forms ─────────────────────────────────────────────────────── */}
-      <Collapse defaultActiveKey={['broker_cash', 'investment']} style={{ marginBottom: 20 }}>
+      {/* ── Add Forms ─────────────────────────────────────────────────────────── */}
+      <Collapse defaultActiveKey={[]} style={{ marginBottom: 20 }}>
         <Panel header="💰 Add Cash to Broking Agency (Manual or CSV Upload)" key="broker_cash">
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             <Form form={cashForm} layout="inline" onFinish={addCash}>
@@ -888,68 +950,81 @@ export default function HomePage() {
         </Panel>
       </Collapse>
 
-      {/* ── All Broker Cash Entries Table ─────────────────────────────────── */}
-      <Card
-        className="enterprise-card"
-        title={<Space><BankOutlined style={{ color: '#2563eb' }} /><span>All Broker Cash Entries</span><Tag color="blue">{brokerCash.length} entries • {fmt(totalBrokerCash)}</Tag></Space>}
-        style={{ marginBottom: 20 }}
-      >
-        <Table dataSource={brokerCash} columns={cashColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 640 }}
-          summary={() => (
-            <Table.Summary.Row>
-              <Table.Summary.Cell index={0} align="right"><Text strong>{fmt(totalBrokerCash)}</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={1}><Text strong>Total Cash Added</Text></Table.Summary.Cell>
-              <Table.Summary.Cell index={2} colSpan={2} />
-            </Table.Summary.Row>
-          )}
-        />
-      </Card>
-
-      {/* ── Holdings Table (GSec & Mutual Funds Only) ─────────────────────── */}
-      <Card
-        className="enterprise-card"
-        title={
-          <Space wrap>
-            <span>Holdings (GSec &amp; Mutual Funds)</span>
-            <Tag color="purple">Invested: {fmt(totalInvested)}</Tag>
-            <Tag color={holdingPnl >= 0 ? 'green' : 'red'}>Holding P&amp;L: {fmtSigned(holdingPnl)}</Tag>
-            <Tag color={diff >= 0 ? 'cyan' : 'red'}>Undeployed Cash: {fmtSigned(diff)}</Tag>
-          </Space>
-        }
-        extra={
-          <Button
-            size="small" icon={<SyncOutlined spin={ltpRefreshing} />}
-            loading={ltpRefreshing} onClick={refreshAllHoldingsLtp}
-          >
-            Refresh Live LTPs
-          </Button>
-        }
-        style={{ marginBottom: 20 }}
-      >
-        <Table dataSource={investments} columns={holdingColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 960 }}
-          summary={() => {
-            const totalCv = investments.reduce((s, r) => r.current_value != null ? s + Number(r.current_value) : s, 0)
-            return (
+      {/* ── Expandable / Collapsible Portfolio Tables ─────────────────────── */}
+      <Collapse defaultActiveKey={[]} style={{ marginBottom: 20 }}>
+        <Panel
+          key="cash"
+          header={
+            <Space wrap>
+              <BankOutlined style={{ color: '#2563eb' }} />
+              <Text strong>All Broker Cash Entries</Text>
+              <Tag color="blue">{brokerCash.length} entries • {fmt(totalBrokerCash)}</Tag>
+            </Space>
+          }
+        >
+          <Table dataSource={brokerCash} columns={cashColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 640 }}
+            summary={() => (
               <Table.Summary.Row>
-                <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total Holdings</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={6} align="right"><Text strong>{fmt(totalInvested)}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell index={7} align="right">
-                  <Text strong style={{ color: '#2563eb' }}>{totalCv > 0 ? fmt(totalCv) : '—'}</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right">
-                  <Text strong style={{ color: holdingPnl >= 0 ? '#10b981' : '#ef4444' }}>{fmtSigned(holdingPnl)}</Text>
-                </Table.Summary.Cell>
-                <Table.Summary.Cell index={9} />
+                <Table.Summary.Cell index={0} align="right"><Text strong>{fmt(totalBrokerCash)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={1}><Text strong>Total Cash Added</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={2} colSpan={2} />
               </Table.Summary.Row>
-            )
-          }}
-        />
-      </Card>
+            )}
+          />
+        </Panel>
 
-      {/* ── Interest Accumulated Table (with Edit + Delete) ───────────────── */}
-      <Card className="enterprise-card" title="Interest Accumulated">
-        <Table dataSource={interests} columns={intColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} scroll={{ x: 600 }} />
-      </Card>
+        <Panel
+          key="holdings"
+          header={
+            <Space wrap>
+              <Text strong>Holdings (GSec &amp; Mutual Funds)</Text>
+              <Tag color="purple">Invested: {fmt(totalInvested)}</Tag>
+              <Tag color={holdingPnl >= 0 ? 'green' : 'red'}>Holding P&amp;L: {fmtSigned(holdingPnl)}</Tag>
+              <Tag color={diff >= 0 ? 'cyan' : 'red'}>Undeployed Cash: {fmtSigned(diff)}</Tag>
+            </Space>
+          }
+          extra={
+            <Button
+              size="small" icon={<SyncOutlined spin={ltpRefreshing} />}
+              loading={ltpRefreshing}
+              onClick={(e) => { e.stopPropagation(); refreshAllHoldingsLtp() }}
+            >
+              Refresh Live LTPs
+            </Button>
+          }
+        >
+          <Table dataSource={investments} columns={holdingColumns} rowKey="id" size="small" pagination={false} scroll={{ x: 960 }}
+            summary={() => {
+              const totalCv = investments.reduce((s, r) => r.current_value != null ? s + Number(r.current_value) : s, 0)
+              return (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={6}><Text strong>Total Holdings</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={6} align="right"><Text strong>{fmt(totalInvested)}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell index={7} align="right">
+                    <Text strong style={{ color: '#2563eb' }}>{totalCv > 0 ? fmt(totalCv) : '—'}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={8} align="right">
+                    <Text strong style={{ color: holdingPnl >= 0 ? '#10b981' : '#ef4444' }}>{fmtSigned(holdingPnl)}</Text>
+                  </Table.Summary.Cell>
+                  <Table.Summary.Cell index={9} />
+                </Table.Summary.Row>
+              )
+            }}
+          />
+        </Panel>
+
+        <Panel
+          key="interest"
+          header={
+            <Space wrap>
+              <Text strong>Interest Accumulated</Text>
+              <Tag color="green">{interests.length} entries • {fmt(totalInterest)}</Tag>
+            </Space>
+          }
+        >
+          <Table dataSource={interests} columns={intColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} scroll={{ x: 600 }} />
+        </Panel>
+      </Collapse>
 
       {/* ── Edit Holding Modal ────────────────────────────────────────────── */}
       <Modal

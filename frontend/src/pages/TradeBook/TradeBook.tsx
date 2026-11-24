@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Upload, Space, Select, Typography,
-  Tag, Modal, Descriptions, Progress, message, Row, Col, Statistic, Spin, Grid,
+  Tag, Modal, Descriptions, Progress, message, Row, Col, Spin, Grid, Popconfirm,
 } from 'antd'
-import { UploadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons'
+import { UploadOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
 import { tradebookApi, homeApi } from '@/services/api'
 import type { Trade, TradeListResponse, TradeUploadResponse } from '@/types'
@@ -50,6 +50,20 @@ export default function TradeBookPage() {
     }
   }
 
+  async function clearFyTrades() {
+    if (!fy) return
+    setLoading(true)
+    try {
+      const { data: res } = await tradebookApi.deleteTrades(fy)
+      message.success(`Deleted ${res.deleted} trades for FY ${fy}`)
+      fetchTrades(1)
+    } catch {
+      message.error('Failed to delete trades')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const uploadProps: UploadProps = {
     accept: '.csv',
     showUploadList: false,
@@ -70,26 +84,38 @@ export default function TradeBookPage() {
 
   const columns = [
     { title: 'Symbol', dataIndex: 'symbol', key: 'symbol', fixed: (screens.md ? 'left' : undefined) as 'left' | undefined, width: 180,
+      sorter: (a: Trade, b: Trade) => a.symbol.localeCompare(b.symbol),
       render: (v: string) => <Text strong style={{ fontSize: 12 }}>{v}</Text> },
     { title: 'Type', dataIndex: 'trade_type', key: 'type', width: 80,
+      sorter: (a: Trade, b: Trade) => a.trade_type.localeCompare(b.trade_type),
       render: (v: string) => <Tag color={v === 'buy' ? 'green' : 'red'}>{v.toUpperCase()}</Tag> },
-    { title: 'Trade Date', dataIndex: 'trade_date', key: 'trade_date', width: 110 },
+    { title: 'Trade Date', dataIndex: 'trade_date', key: 'trade_date', width: 110,
+      sorter: (a: Trade, b: Trade) => a.trade_date.localeCompare(b.trade_date) },
     { title: 'Expiry', dataIndex: 'expiry_date', key: 'expiry', width: 110,
+      sorter: (a: Trade, b: Trade) => (a.expiry_date || '').localeCompare(b.expiry_date || ''),
       render: (v: string) => v || '—' },
     { title: 'Qty', dataIndex: 'quantity', key: 'qty', align: 'right' as const, width: 90,
+      sorter: (a: Trade, b: Trade) => Number(a.quantity) - Number(b.quantity),
       render: (v: number) => Number(v).toLocaleString() },
     { title: 'Price (₹)', dataIndex: 'price', key: 'price', align: 'right' as const, width: 100,
+      sorter: (a: Trade, b: Trade) => Number(a.price) - Number(b.price),
       render: (v: number) => `₹${Number(v).toFixed(2)}` },
     { title: 'Value (₹)', key: 'value', align: 'right' as const, width: 120,
+      sorter: (a: Trade, b: Trade) => (Number(a.quantity) * Number(a.price)) - (Number(b.quantity) * Number(b.price)),
       render: (_: any, row: Trade) =>
         `₹${(Number(row.quantity) * Number(row.price)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}` },
-    { title: 'Exchange', dataIndex: 'exchange', key: 'exchange', width: 90 },
-    { title: 'Segment', dataIndex: 'segment', key: 'segment', width: 80 },
+    { title: 'Exchange', dataIndex: 'exchange', key: 'exchange', width: 90,
+      sorter: (a: Trade, b: Trade) => a.exchange.localeCompare(b.exchange) },
+    { title: 'Segment', dataIndex: 'segment', key: 'segment', width: 80,
+      sorter: (a: Trade, b: Trade) => a.segment.localeCompare(b.segment) },
     { title: 'Order Exec Time', dataIndex: 'order_execution_time', key: 'oet', width: 170,
+      sorter: (a: Trade, b: Trade) => a.order_execution_time.localeCompare(b.order_execution_time),
       render: (v: string) => new Date(v).toLocaleString('en-IN') },
     { title: 'Trade ID', dataIndex: 'trade_id', key: 'tid', width: 100,
+      sorter: (a: Trade, b: Trade) => a.trade_id.localeCompare(b.trade_id),
       render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> },
-    { title: 'FY', dataIndex: 'financial_year', key: 'fy', width: 90 },
+    { title: 'FY', dataIndex: 'financial_year', key: 'fy', width: 90,
+      sorter: (a: Trade, b: Trade) => a.financial_year.localeCompare(b.financial_year) },
   ]
 
   return (
@@ -105,6 +131,15 @@ export default function TradeBookPage() {
             <Button type="primary" icon={<UploadOutlined />}>Upload CSV</Button>
           </Upload>
           <Button icon={<ReloadOutlined />} onClick={() => fetchTrades(1)}>Refresh</Button>
+          <Popconfirm
+            title={`Delete all trades for FY ${fy}?`}
+            description="You can re-upload the CSV right after deleting."
+            onConfirm={clearFyTrades}
+            okText="Delete"
+            okButtonProps={{ danger: true }}
+          >
+            <Button danger icon={<DeleteOutlined />}>Delete Trades</Button>
+          </Popconfirm>
         </Space>
       </Space>
 

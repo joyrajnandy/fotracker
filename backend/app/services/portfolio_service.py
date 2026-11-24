@@ -13,7 +13,7 @@ from app.models.trade import Trade
 from app.models.broker_cash import BrokerCash
 from app.schemas.investment import InvestmentCreate, InvestmentUpdate, InterestCreate, InterestUpdate
 from app.schemas.broker_cash import BrokerCashCreate, BrokerCashUpdate
-from app.services.pnl_service import calculate_pnl
+from app.services.pnl_service import calculate_pnl, get_or_create_brokerage_setting
 from app.utils.financial_year import get_financial_year
 
 
@@ -408,13 +408,20 @@ def _build_growth_chart(db: Session, user_id: int, financial_year: str, total_ca
         .all()
     )
 
+    setting = get_or_create_brokerage_setting(db, user_id, financial_year)
+    total_trades = len(trades)
+    if setting.custom_total_brokerage is not None and total_trades > 0:
+        eff_fee = float(setting.custom_total_brokerage) / total_trades
+    else:
+        eff_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 25.7)
+
     monthly_pnl: dict = defaultdict(float)
     monthly_int: dict = defaultdict(float)
 
     for t in trades:
         mk = t.trade_date.strftime("%Y-%m")
         val = float(t.quantity) * float(t.price)
-        monthly_pnl[mk] += val if t.trade_type == "sell" else -val
+        monthly_pnl[mk] += (val if t.trade_type == "sell" else -val) - eff_fee
 
     for i in interests:
         monthly_int[i.interest_date.strftime("%Y-%m")] += float(i.amount)
