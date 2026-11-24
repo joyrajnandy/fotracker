@@ -31,6 +31,9 @@ export const authApi = {
   me: () => api.get('/auth/me'),
   createInviteLink: () => api.post('/auth/invite-link'),
   validateInvite: (token: string) => api.get('/auth/invite-validate', { params: { token } }),
+  listUsers: () => api.get('/auth/users'),
+  toggleUserStatus: (userId: number, is_active: boolean) =>
+    api.patch(`/auth/users/${userId}/status`, { is_active }),
 }
 
 // ── Market ────────────────────────────────────────────────────────────────────
@@ -38,6 +41,7 @@ export const marketApi = {
   getIndices: () => api.get('/market/indices'),
   getLtp: (instrument_code: string, instrument_type?: string, name?: string) =>
     api.get('/market/ltp', { params: { instrument_code, instrument_type, name } }),
+  getGsec: (fy?: string) => api.get('/market/gsec', { params: { financial_year: fy } }),
 }
 
 // ── Home ──────────────────────────────────────────────────────────────────────

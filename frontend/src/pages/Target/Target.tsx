@@ -95,6 +95,7 @@ function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
   const columns = [
     {
       title: label, dataIndex: 'label', key: 'label', width: 230,
+      sorter: (a: PeriodRow, b: PeriodRow) => a.start.localeCompare(b.start),
       render: (v: string, row: PeriodRow) => (
         row.is_future
           ? <Tag color="default"><ClockCircleOutlined /> {v}</Tag>
@@ -103,14 +104,17 @@ function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
     },
     {
       title: 'Capital Base (Cash)', dataIndex: 'capital_base', key: 'cap', align: 'right' as const,
+      sorter: (a: PeriodRow, b: PeriodRow) => a.capital_base - b.capital_base,
       render: (v: number) => <Text type="secondary">{fmt(v)}</Text>,
     },
     {
       title: 'Target', dataIndex: 'target', key: 'target', align: 'right' as const,
+      sorter: (a: PeriodRow, b: PeriodRow) => a.target - b.target,
       render: (v: number) => fmt(v),
     },
     {
       title: 'P&L', dataIndex: 'pnl', key: 'pnl', align: 'right' as const,
+      sorter: (a: PeriodRow, b: PeriodRow) => a.pnl - b.pnl,
       render: (v: number, row: PeriodRow) => row.is_future
         ? <Text type="secondary">—</Text>
         : <Text strong style={{ color: v >= 0 ? '#10b981' : '#ef4444' }}>
@@ -119,6 +123,7 @@ function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
     },
     {
       title: 'Progress', dataIndex: 'pct', key: 'pct', width: 180,
+      sorter: (a: PeriodRow, b: PeriodRow) => a.pct - b.pct,
       render: (v: number, row: PeriodRow) => row.is_future
         ? <Text type="secondary">—</Text>
         : (
@@ -134,6 +139,7 @@ function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
     },
     {
       title: 'Status', key: 'status', width: 110, align: 'center' as const,
+      sorter: (a: PeriodRow, b: PeriodRow) => Number(a.achieved) - Number(b.achieved),
       render: (_: any, row: PeriodRow) => row.is_future
         ? <Tag color="default">Future</Tag>
         : row.achieved

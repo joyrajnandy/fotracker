@@ -11,7 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts'
 import { pnlApi, homeApi } from '@/services/api'
-import type { PnLSummary, PnLByExpiry } from '@/types'
+import type { PnLSummary, PnLByExpiry, OpenPosition } from '@/types'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -116,6 +116,7 @@ export default function PnLPage() {
       title: 'Index',
       dataIndex: 'symbol_base',
       key: 'sym',
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.symbol_base.localeCompare(b.symbol_base),
       render: (v: string) => (
         <Tag color={v.toUpperCase().includes('SENSEX') ? 'purple' : v.toUpperCase().includes('NIFTY') ? 'blue' : 'default'} style={{ fontWeight: 600 }}>
           {v}
@@ -126,6 +127,7 @@ export default function PnLPage() {
       title: 'Expiry Date',
       dataIndex: 'expiry_date',
       key: 'expiry',
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => (a.expiry_date || '').localeCompare(b.expiry_date || ''),
       render: (v: string | null) => v ?? '—',
     },
     {
@@ -133,12 +135,14 @@ export default function PnLPage() {
       dataIndex: 'trades_count',
       key: 'tc',
       align: 'right' as const,
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.trades_count - b.trades_count,
     },
     {
       title: 'Gross P&L',
       dataIndex: 'gross_pnl',
       key: 'gpnl',
       align: 'right' as const,
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.gross_pnl - b.gross_pnl,
       render: (v: number) => (
         <Text style={{ color: v >= 0 ? '#10b981' : '#ef4444' }}>
           {v >= 0 ? '+' : '-'}{fmt(v)}
@@ -150,6 +154,7 @@ export default function PnLPage() {
       dataIndex: 'brokerage',
       key: 'brk',
       align: 'right' as const,
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.brokerage - b.brokerage,
       render: (v: number) => <Text type="secondary">-{fmt(v)}</Text>,
     },
     {
@@ -157,6 +162,7 @@ export default function PnLPage() {
       dataIndex: 'realized_pnl',
       key: 'pnl',
       align: 'right' as const,
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.realized_pnl - b.realized_pnl,
       render: (v: number) => (
         <Text strong style={{ color: v >= 0 ? '#10b981' : '#ef4444' }}>
           {v >= 0 ? '+' : '-'}{fmt(v)}
@@ -167,6 +173,7 @@ export default function PnLPage() {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
+      sorter: (a: PnLByExpiry, b: PnLByExpiry) => a.status.localeCompare(b.status),
       render: (v: string) => (
         <Tag color={v === 'profit' ? 'success' : v === 'loss' ? 'error' : 'default'}>
           {v.toUpperCase()}
@@ -201,49 +208,37 @@ export default function PnLPage() {
         </Space>
       </Space>
 
-      {/* Summary cards */}
+      {/* 3 Summary Cards: Realised Net P&L, UnRealised Net P&L, Total Trades */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card-green" style={{ borderRadius: 14, border: 'none' }}>
+        <Col xs={24} sm={8}>
+          <Card className={(summary?.net_pnl ?? 0) >= 0 ? 'stat-card-green' : 'stat-card-red'} style={{ borderRadius: 14, border: 'none' }}>
             <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Net Profit</Text>}
-              value={summary?.total_profit ?? 0}
-              prefix="₹"
-              valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
-              formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              suffix={<ArrowUpOutlined style={{ color: '#fff' }} />}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card-red" style={{ borderRadius: 14, border: 'none' }}>
-            <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Net Loss</Text>}
-              value={summary?.total_loss ?? 0}
-              prefix="₹"
-              valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
-              formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              suffix={<ArrowDownOutlined style={{ color: '#fff' }} />}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className={(summary?.net_pnl ?? 0) >= 0 ? 'stat-card-blue' : 'stat-card-red'} style={{ borderRadius: 14, border: 'none' }}>
-            <Statistic
-              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Net P&amp;L (After Brokerage)</Text>}
+              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Realised Net P&amp;L</Text>}
               value={Math.abs(summary?.net_pnl ?? 0)}
               prefix={(summary?.net_pnl ?? 0) >= 0 ? '+₹' : '-₹'}
-              valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
+              valueStyle={{ color: '#fff', fontSize: 22, fontWeight: 700 }}
+              formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              suffix={(summary?.net_pnl ?? 0) >= 0 ? <ArrowUpOutlined style={{ color: '#fff' }} /> : <ArrowDownOutlined style={{ color: '#fff' }} />}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={8}>
+          <Card className={(summary?.total_unrealised_pnl ?? 0) >= 0 ? 'stat-card-blue' : 'stat-card-red'} style={{ borderRadius: 14, border: 'none' }}>
+            <Statistic
+              title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>UnRealised Net P&amp;L</Text>}
+              value={Math.abs(summary?.total_unrealised_pnl ?? 0)}
+              prefix={(summary?.total_unrealised_pnl ?? 0) >= 0 ? '+₹' : '-₹'}
+              valueStyle={{ color: '#fff', fontSize: 22, fontWeight: 700 }}
               formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             />
           </Card>
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={8}>
           <Card className="stat-card-orange" style={{ borderRadius: 14, border: 'none' }}>
             <Statistic
               title={<Text style={{ color: 'rgba(255,255,255,.88)', fontSize: 13 }}>Total Trades</Text>}
               value={summary?.total_trades ?? 0}
-              valueStyle={{ color: '#fff', fontSize: 20, fontWeight: 700 }}
+              valueStyle={{ color: '#fff', fontSize: 22, fontWeight: 700 }}
               suffix={<SwapOutlined style={{ color: '#fff' }} />}
             />
           </Card>
@@ -333,6 +328,66 @@ export default function PnLPage() {
           </Col>
         </Row>
       </Card>
+
+      {/* Open Positions & Unrealised P&L */}
+      {(summary?.open_positions?.length ?? 0) > 0 && (
+        <Card
+          className="enterprise-card"
+          style={{ marginBottom: 20 }}
+          title={
+            <Space wrap>
+              <span>Open Positions (Unrealised)</span>
+              <Tag color="gold">{summary?.open_positions?.length} open contracts</Tag>
+              <Tag color={(summary?.total_unrealised_pnl ?? 0) >= 0 ? 'green' : 'red'}>
+                Open Net Cashflow: {(summary?.total_unrealised_pnl ?? 0) >= 0 ? '+' : '-'}{fmt(summary?.total_unrealised_pnl ?? 0)}
+              </Tag>
+            </Space>
+          }
+        >
+          <Table
+            dataSource={summary?.open_positions ?? []}
+            rowKey={(r: OpenPosition) => `${r.symbol}-${r.expiry_date}`}
+            size="small"
+            pagination={false}
+            scroll={{ x: 700 }}
+            columns={[
+              {
+                title: 'Contract', dataIndex: 'symbol', key: 'sym',
+                sorter: (a: OpenPosition, b: OpenPosition) => a.symbol.localeCompare(b.symbol),
+                render: (v: string) => <Text strong>{v}</Text>,
+              },
+              {
+                title: 'Expiry', dataIndex: 'expiry_date', key: 'exp',
+                sorter: (a: OpenPosition, b: OpenPosition) => (a.expiry_date || '').localeCompare(b.expiry_date || ''),
+                render: (v: string | null) => v ?? '—',
+              },
+              {
+                title: 'Side / Net Qty', dataIndex: 'net_qty', key: 'qty', align: 'right' as const,
+                sorter: (a: OpenPosition, b: OpenPosition) => a.net_qty - b.net_qty,
+                render: (v: number) => (
+                  <Tag color={v > 0 ? 'green' : 'red'}>
+                    {v > 0 ? `LONG +${v}` : `SHORT ${v}`}
+                  </Tag>
+                ),
+              },
+              {
+                title: 'Avg Price', dataIndex: 'avg_price', key: 'avg', align: 'right' as const,
+                sorter: (a: OpenPosition, b: OpenPosition) => a.avg_price - b.avg_price,
+                render: (v: number) => fmt(v),
+              },
+              {
+                title: 'Open Cashflow / Unrealised', dataIndex: 'open_value', key: 'ov', align: 'right' as const,
+                sorter: (a: OpenPosition, b: OpenPosition) => a.open_value - b.open_value,
+                render: (v: number) => (
+                  <Text strong style={{ color: v >= 0 ? '#10b981' : '#ef4444' }}>
+                    {v >= 0 ? '+' : '-'}{fmt(v)}
+                  </Text>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       {/* Full-width Bar Chart */}
       <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
