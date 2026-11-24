@@ -20,7 +20,10 @@ async def upload_csv(
     """Upload a CSV file of trades. Duplicates are skipped automatically."""
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are accepted")
+    max_size = 10 * 1024 * 1024  # 10 MB limit
     content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(status_code=413, detail="CSV file exceeds 10 MB limit")
     return upload_trades_csv(db, current_user.id, content)
 
 

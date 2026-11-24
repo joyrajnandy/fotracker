@@ -54,10 +54,11 @@ export interface TradeUploadResponse {
 export interface Investment {
   id: number
   user_id: number
-  instrument_type: string
+  instrument_type: 'GSec' | 'Mutual Fund' | string
   name: string
   invested_value: number
-  investment_date: string
+  current_value?: number | null
+  investment_date?: string | null
   financial_year: string
   notes?: string
   created_at: string
@@ -74,6 +75,16 @@ export interface Interest {
   created_at: string
 }
 
+export interface BrokerCash {
+  id: number
+  user_id: number
+  amount: number
+  cash_date: string
+  financial_year: string
+  description?: string
+  created_at: string
+}
+
 export interface GrowthDataPoint {
   date: string
   invested: number
@@ -85,9 +96,30 @@ export interface HomeSummary {
   total_invested: number
   total_interest: number
   total_pnl: number
+  total_profit: number
   net_value: number
   financial_year: string
   growth_data: GrowthDataPoint[]
+  total_broker_cash: number
+  broker_vs_invested_diff: number
+  xirr: number | null
+  total_current_value: number
+  total_holding_pnl: number
+}
+
+export interface MarketIndex {
+  symbol: string
+  price: number | null
+  prev_close: number | null
+  change: number | null
+  change_pct: number | null
+  market_state: string
+  live: boolean
+}
+
+export interface MarketIndicesResponse {
+  indices: MarketIndex[]
+  updated_at: number
 }
 
 export interface PnLByExpiry {
@@ -112,6 +144,18 @@ export interface PnLSummary {
   by_expiry: PnLByExpiry[]
 }
 
+export interface PeriodRow {
+  label: string
+  start: string
+  end: string
+  capital_base: number
+  target: number
+  pnl: number
+  achieved: boolean
+  pct: number
+  is_future: boolean
+}
+
 export interface TargetAchievement {
   financial_year: string
   yearly_target: number
@@ -130,4 +174,7 @@ export interface TargetAchievement {
   quarterly_pct: number
   monthly_pct: number
   weekly_pct: number
+  all_quarters: PeriodRow[]
+  all_months: PeriodRow[]
+  all_weeks: PeriodRow[]
 }

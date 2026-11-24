@@ -1,29 +1,34 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Row, Col, Card, Statistic, Select, Button, Form, Input,
-  InputNumber, DatePicker, Table, Divider, Typography, Space,
-  message, Collapse, Tag, Spin,
+  InputNumber, DatePicker, Table, Typography, Space,
+  message, Collapse, Tag, Spin, Tooltip, Modal, Progress, Slider,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, RiseOutlined, FallOutlined,
-  DollarOutlined, BankOutlined,
+  DollarOutlined, BankOutlined, PercentageOutlined, SwapOutlined,
+  InfoCircleOutlined, EditOutlined, ForwardOutlined, ReloadOutlined,
+  ThunderboltOutlined, PieChartOutlined,
 } from '@ant-design/icons'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
+  Tooltip as ReTooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import dayjs from 'dayjs'
-import { homeApi } from '@/services/api'
-import type { HomeSummary, Investment, Interest } from '@/types'
+import { homeApi, brokerCashApi, marketApi } from '@/services/api'
+import type { HomeSummary, Investment, Interest, BrokerCash, MarketIndex } from '@/types'
 
 const { Title, Text } = Typography
 const { Option } = Select
 const { Panel } = Collapse
 
-const INSTRUMENT_TYPES = ['GSec', 'Mutual Fund', 'Fixed Deposit', 'Equity', 'ETF', 'PPF', 'NPS', 'Other']
+const HOLDING_TYPES = ['GSec', 'Mutual Fund'] as const
 
 function fmt(val: number) {
-  return `₹${val.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+  return `₹${Math.abs(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+function fmtSigned(val: number) {
+  return `${val >= 0 ? '+' : '-'}₹${Math.abs(val).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
 export default function HomePage() {
@@ -32,9 +37,42 @@ export default function HomePage() {
   const [summary, setSummary] = useState<HomeSummary | null>(null)
   const [investments, setInvestments] = useState<Investment[]>([])
   const [interests, setInterests] = useState<Interest[]>([])
+  const [brokerCash, setBrokerCash] = useState<BrokerCash[]>([])
+  const [indices, setIndices] = useState<MarketIndex[]>([])
+  const [marketLoading, setMarketLoading] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [simRate, setSimRate] = useState<number>(10)
+
   const [invForm] = Form.useForm()
   const [intForm] = Form.useForm()
+  const [cashForm] = Form.useForm()
+  const [editHoldingForm] = Form.useForm()
+  const [editCashForm] = Form.useForm()
+
+  const [editHoldingOpen, setEditHoldingOpen] = useState(false)
+  const [editingHolding, setEditingHolding] = useState<Investment | null>(null)
+  const [editCashOpen, setEditCashOpen] = useState(false)
+  const [editingCash, setEditingCash] = useState<BrokerCash | null>(null)
+  const [carryModalOpen, setCarryModalOpen] = useState(false)
+  const [carryLoading, setCarryLoading] = useState(false)
+
+  const fetchMarket = useCallback(async () => {
+    setMarketLoading(true)
+    try {
+      const { data } = await marketApi.getIndices()
+      setIndices(data.indices || [])
+    } catch {
+      // silent fallback
+    } finally {
+      setMarketLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchMarket()
+    const timer = setInterval(fetchMarket, 30000)
+    return () => clearInterval(timer)
+  }, [fetchMarket])
 
   useEffect(() => {
     homeApi.getFinancialYears().then(({ data }) => {
@@ -43,44 +81,139 @@ export default function HomePage() {
     })
   }, [])
 
-  useEffect(() => {
+  const refreshData = useCallback(() => {
     if (!fy) return
-    setLoading(true)
     Promise.all([
       homeApi.getSummary(fy),
       homeApi.getInvestments(fy),
       homeApi.getInterests(fy),
-    ]).then(([s, inv, int]) => {
+      brokerCashApi.list(fy),
+    ]).then(([s, inv, int, bc]) => {
       setSummary(s.data)
       setInvestments(inv.data)
       setInterests(int.data)
+      setBrokerCash(bc.data)
     }).finally(() => setLoading(false))
   }, [fy])
 
-  async function addInvestment(values: any) {
+  useEffect(() => {
+    if (!fy) return
+    setLoading(true)
+    refreshData()
+  }, [fy, refreshData])
+
+  // ── CRUD Handlers ─────────────────────────────────────────────────────────
+
+  async function addHolding(values: any) {
     try {
-      const payload = {
-        ...values,
-        investment_date: values.investment_date.format('YYYY-MM-DD'),
+      await homeApi.addInvestment({
+        instrument_type: values.instrument_type,
+        name: values.name,
+        invested_value: values.invested_value,
+        current_value: values.current_value ?? null,
         financial_year: fy,
-      }
-      await homeApi.addInvestment(payload)
-      message.success('Investment added')
+      })
+      message.success('Holding added')
       invForm.resetFields()
       refreshData()
     } catch (err: any) {
-      message.error(err?.response?.data?.detail || 'Failed to add investment')
+      message.error(err?.response?.data?.detail || 'Failed to add holding')
     }
+  }
+
+  function openEditHolding(row: Investment) {
+    setEditingHolding(row)
+    editHoldingForm.setFieldsValue({
+      instrument_type: row.instrument_type,
+      name: row.name,
+      invested_value: Number(row.invested_value),
+      current_value: row.current_value != null ? Number(row.current_value) : null,
+    })
+    setEditHoldingOpen(true)
+  }
+
+  async function saveEditHolding(values: any) {
+    if (!editingHolding) return
+    try {
+      await homeApi.updateInvestment(editingHolding.id, {
+        instrument_type: values.instrument_type,
+        name: values.name,
+        invested_value: values.invested_value,
+        current_value: values.current_value ?? null,
+      })
+      message.success('Holding updated')
+      setEditHoldingOpen(false)
+      refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update holding')
+    }
+  }
+
+  async function deleteHolding(id: number) {
+    try {
+      await homeApi.deleteInvestment(id)
+      message.success('Holding removed')
+      refreshData()
+    } catch { message.error('Failed to delete holding') }
+  }
+
+  async function addCash(values: any) {
+    try {
+      await brokerCashApi.add({
+        amount: values.amount,
+        cash_date: values.cash_date.format('YYYY-MM-DD'),
+        description: values.description || null,
+        financial_year: fy,
+      })
+      message.success('Broker cash entry added')
+      cashForm.resetFields()
+      refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to add cash entry')
+    }
+  }
+
+  function openEditCash(row: BrokerCash) {
+    setEditingCash(row)
+    editCashForm.setFieldsValue({
+      amount: Number(row.amount),
+      cash_date: dayjs(row.cash_date),
+      description: row.description || '',
+    })
+    setEditCashOpen(true)
+  }
+
+  async function saveEditCash(values: any) {
+    if (!editingCash) return
+    try {
+      await brokerCashApi.update(editingCash.id, {
+        amount: values.amount,
+        cash_date: values.cash_date.format('YYYY-MM-DD'),
+        description: values.description || null,
+      })
+      message.success('Broker cash entry updated')
+      setEditCashOpen(false)
+      refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Failed to update cash entry')
+    }
+  }
+
+  async function deleteCash(id: number) {
+    try {
+      await brokerCashApi.delete(id, fy)
+      message.success('Cash entry removed')
+      refreshData()
+    } catch { message.error('Failed to delete cash entry') }
   }
 
   async function addInterest(values: any) {
     try {
-      const payload = {
+      await homeApi.addInterest({
         ...values,
         interest_date: values.interest_date.format('YYYY-MM-DD'),
         financial_year: fy,
-      }
-      await homeApi.addInterest(payload)
+      })
       message.success('Interest entry added')
       intForm.resetFields()
       refreshData()
@@ -89,136 +222,455 @@ export default function HomePage() {
     }
   }
 
-  async function deleteInvestment(id: number) {
+  async function doCarryForward(values: any) {
+    setCarryLoading(true)
     try {
-      await homeApi.deleteInvestment(id)
-      message.success('Investment removed')
-      refreshData()
-    } catch {
-      message.error('Failed to delete')
+      const { data } = await homeApi.carryForward(values.from_fy, values.to_fy)
+      message.success(
+        `Carried forward: ${data.investments_copied} holdings & ${data.cash_copied} cash entries to ${data.to_fy}`
+      )
+      setCarryModalOpen(false)
+      if (values.to_fy === fy) refreshData()
+    } catch (err: any) {
+      message.error(err?.response?.data?.detail || 'Carry-forward failed')
+    } finally {
+      setCarryLoading(false)
     }
   }
 
-  function refreshData() {
-    if (!fy) return
-    Promise.all([
-      homeApi.getSummary(fy),
-      homeApi.getInvestments(fy),
-      homeApi.getInterests(fy),
-    ]).then(([s, inv, int]) => {
-      setSummary(s.data)
-      setInvestments(inv.data)
-      setInterests(int.data)
-    })
-  }
+  // ── Derived Metrics ───────────────────────────────────────────────────────
+  const totalInvested = summary?.total_invested ?? 0
+  const totalBrokerCash = summary?.total_broker_cash ?? 0
+  const diff = summary?.broker_vs_invested_diff ?? 0
+  const holdingPnl = summary?.total_holding_pnl ?? 0
+  const fnoPnl = summary?.total_pnl ?? 0
+  const totalInterest = summary?.total_interest ?? 0
+  const totalProfit = summary?.total_profit ?? 0
+  const netValue = summary?.net_value ?? 0
+  const xirrPct = summary?.xirr != null ? (summary.xirr * 100).toFixed(2) : null
 
-  const invColumns = [
-    { title: 'Type', dataIndex: 'instrument_type', key: 'type', render: (v: string) => <Tag color="blue">{v}</Tag> },
-    { title: 'Name', dataIndex: 'name', key: 'name' },
-    { title: 'Amount (₹)', dataIndex: 'invested_value', key: 'amount', render: (v: number) => fmt(v), align: 'right' as const },
-    { title: 'Date', dataIndex: 'investment_date', key: 'date' },
-    { title: 'Notes', dataIndex: 'notes', key: 'notes', render: (v: string) => v || '—' },
+  const gsecTotal = investments
+    .filter((i) => i.instrument_type === 'GSec')
+    .reduce((s, r) => s + Number(r.invested_value), 0)
+  const mfTotal = investments
+    .filter((i) => i.instrument_type === 'Mutual Fund')
+    .reduce((s, r) => s + Number(r.invested_value), 0)
+  const cashBase = totalBrokerCash > 0 ? totalBrokerCash : Math.max(totalInvested, 1)
+
+  // ── Table Columns ─────────────────────────────────────────────────────────
+  const holdingColumns = [
     {
-      title: '', key: 'action',
+      title: 'Type', dataIndex: 'instrument_type', key: 'type', width: 130,
+      render: (v: string) => (
+        <Tag color={v === 'GSec' ? 'geekblue' : 'purple'} style={{ fontWeight: 600 }}>{v}</Tag>
+      ),
+    },
+    { title: 'Name', dataIndex: 'name', key: 'name', render: (v: string) => <Text strong>{v}</Text> },
+    {
+      title: 'Invested (₹)', dataIndex: 'invested_value', key: 'invested',
+      align: 'right' as const, render: (v: number) => fmt(v),
+    },
+    {
+      title: 'Current Value (₹)', dataIndex: 'current_value', key: 'cv',
+      align: 'right' as const,
+      render: (v: number | null) => (
+        <Text style={{ color: v != null ? '#2563eb' : '#94a3b8', fontWeight: v != null ? 600 : 400 }}>
+          {v != null ? fmt(v) : '—'}
+        </Text>
+      ),
+    },
+    {
+      title: 'Holding P&L (₹)', key: 'holding_pnl', align: 'right' as const,
+      render: (_: any, row: Investment) => {
+        if (row.current_value == null) return <Text type="secondary">—</Text>
+        const pnl = Number(row.current_value) - Number(row.invested_value)
+        return (
+          <Text strong style={{ color: pnl >= 0 ? '#10b981' : '#ef4444' }}>
+            {fmtSigned(pnl)}
+          </Text>
+        )
+      },
+    },
+    {
+      title: 'Actions', key: 'action', width: 100, align: 'center' as const,
       render: (_: any, row: Investment) => (
-        <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteInvestment(row.id)} />
+        <Space size={4}>
+          <Tooltip title="Edit holding">
+            <Button icon={<EditOutlined />} size="small" onClick={() => openEditHolding(row)} />
+          </Tooltip>
+          <Tooltip title="Delete holding">
+            <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteHolding(row.id)} />
+          </Tooltip>
+        </Space>
+      ),
+    },
+  ]
+
+  const cashColumns = [
+    {
+      title: 'Cash Added (₹)', dataIndex: 'amount', key: 'amount',
+      align: 'right' as const,
+      render: (v: number) => <Text strong style={{ color: '#0f172a' }}>{fmt(v)}</Text>,
+    },
+    { title: 'Date Added', dataIndex: 'cash_date', key: 'date', width: 140 },
+    { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
+    {
+      title: 'Actions', key: 'action', width: 100, align: 'center' as const,
+      render: (_: any, row: BrokerCash) => (
+        <Space size={4}>
+          <Tooltip title="Edit cash entry">
+            <Button icon={<EditOutlined />} size="small" onClick={() => openEditCash(row)} />
+          </Tooltip>
+          <Tooltip title="Delete cash entry">
+            <Button danger icon={<DeleteOutlined />} size="small" onClick={() => deleteCash(row.id)} />
+          </Tooltip>
+        </Space>
       ),
     },
   ]
 
   const intColumns = [
     { title: 'Amount (₹)', dataIndex: 'amount', key: 'amount', render: (v: number) => fmt(v), align: 'right' as const },
-    { title: 'Date', dataIndex: 'interest_date', key: 'date' },
+    { title: 'Date', dataIndex: 'interest_date', key: 'date', width: 140 },
     { title: 'Description', dataIndex: 'description', key: 'desc', render: (v: string) => v || '—' },
   ]
 
   return (
     <Spin spinning={loading}>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 24 }} wrap>
-        <Title level={3} style={{ margin: 0 }}>Portfolio Overview</Title>
-        <Space>
+      {/* ── Live SENSEX & NIFTY 50 Market Pulse Bar ───────────────────────── */}
+      <Card
+        className="enterprise-card"
+        bodyStyle={{ padding: '12px 20px' }}
+        style={{
+          marginBottom: 20,
+          background: 'linear-gradient(90deg, #0f172a 0%, #1e293b 100%)',
+          border: '1px solid #334155',
+        }}
+      >
+        <Row align="middle" justify="space-between" gutter={[16, 12]}>
+          <Col>
+            <Space size={10}>
+              <span className="live-dot" />
+              <Text strong style={{ color: '#f8fafc', fontSize: 13, letterSpacing: '0.04em' }}>
+                LIVE MARKET PULSE
+              </Text>
+              <Tag color="blue" style={{ margin: 0, fontSize: 11 }}>NSE / BSE</Tag>
+            </Space>
+          </Col>
+          <Col flex="auto">
+            <Row gutter={[24, 8]} justify="center">
+              {(indices.length > 0 ? indices : [
+                { symbol: 'NIFTY 50', price: null, change: null, change_pct: null, market_state: 'LOADING', live: false },
+                { symbol: 'SENSEX', price: null, change: null, change_pct: null, market_state: 'LOADING', live: false },
+              ]).map((idx) => {
+                const isUp = (idx.change ?? 0) >= 0
+                return (
+                  <Col key={idx.symbol}>
+                    <Space size={12} style={{
+                      background: 'rgba(255,255,255,0.06)',
+                      padding: '6px 14px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(255,255,255,0.1)',
+                    }}>
+                      <Text strong style={{ color: '#cbd5e1', fontSize: 12 }}>{idx.symbol}</Text>
+                      {idx.live && idx.price != null ? (
+                        <>
+                          <Text strong className="num-tabular" style={{ color: '#ffffff', fontSize: 15 }}>
+                            {idx.price.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </Text>
+                          <Tag color={isUp ? 'success' : 'error'} style={{ margin: 0, fontWeight: 600 }}>
+                            {isUp ? '▲' : '▼'} {Math.abs(idx.change ?? 0).toFixed(2)} ({isUp ? '+' : ''}{(idx.change_pct ?? 0).toFixed(2)}%)
+                          </Tag>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#94a3b8', fontSize: 12 }}>Feed unavailable</Text>
+                      )}
+                    </Space>
+                  </Col>
+                )
+              })}
+            </Row>
+          </Col>
+          <Col>
+            <Tooltip title="Refresh live SENSEX & NIFTY quotes">
+              <Button
+                size="small"
+                ghost
+                icon={<ReloadOutlined spin={marketLoading} />}
+                onClick={fetchMarket}
+                style={{ color: '#cbd5e1', borderColor: '#475569' }}
+              >
+                Refresh
+              </Button>
+            </Tooltip>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* ── Page Header ───────────────────────────────────────────────────── */}
+      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 20 }} wrap>
+        <div>
+          <Title level={3} style={{ margin: 0, color: '#0f172a' }}>Portfolio Overview</Title>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            Real capital via Broker Cash • GSec &amp; Mutual Fund Holdings • F&amp;O Performance
+          </Text>
+        </div>
+        <Space wrap>
           <Text type="secondary">Financial Year:</Text>
           <Select value={fy} onChange={setFy} style={{ width: 120 }}>
             {financialYears.map((y) => <Option key={y} value={y}>{y}</Option>)}
           </Select>
+          <Tooltip title="Carry forward holdings & broker cash to another FY">
+            <Button icon={<ForwardOutlined />} onClick={() => setCarryModalOpen(true)}>
+              Carry Forward
+            </Button>
+          </Tooltip>
         </Space>
       </Space>
 
-      {/* Summary cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+      {/* ── XIRR & Total Profit Hero Card ─────────────────────────────────── */}
+      <Card style={{
+        marginBottom: 20, borderRadius: 14,
+        background: 'linear-gradient(135deg, #0b1120 0%, #1e1b4b 55%, #172554 100%)',
+        border: '1px solid #312e81',
+        boxShadow: '0 10px 30px rgba(15, 23, 42, 0.16)',
+      }}>
+        <Row gutter={[24, 16]} align="middle">
+          <Col xs={24} md={7}>
+            <Space direction="vertical" size={2}>
+              <Space>
+                <PercentageOutlined style={{ color: '#60a5fa', fontSize: 18 }} />
+                <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 13 }}>PORTFOLIO XIRR</Text>
+                <Tooltip title="Annualised XIRR calculated from your broker cash deposit dates as outflows and today's Net Portfolio Value as terminal inflow.">
+                  <InfoCircleOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />
+                </Tooltip>
+              </Space>
+              <Text className="num-tabular" style={{ fontSize: 34, fontWeight: 800 }}>
+                {xirrPct != null
+                  ? <span style={{ color: parseFloat(xirrPct) >= 0 ? '#34d399' : '#fb7185' }}>{xirrPct}%</span>
+                  : <span style={{ color: '#94a3b8', fontSize: 18 }}>Add cash to compute</span>}
+              </Text>
+              <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>
+                Annualised return on broker cash invested
+              </Text>
+            </Space>
+          </Col>
+
+          <Col xs={24} md={17}>
+            <Row gutter={[16, 12]}>
+              {[
+                { label: 'Real Investment (Broker Cash)', val: totalBrokerCash, color: '#f8fafc' },
+                {
+                  label: 'Total Profit (Holdings + F&O + Int)',
+                  val: totalProfit,
+                  color: totalProfit >= 0 ? '#34d399' : '#fb7185',
+                  signed: true,
+                },
+                { label: 'Net Portfolio Value', val: netValue, color: '#fbbf24' },
+                {
+                  label: diff >= 0 ? 'Undeployed Cash in Broker' : 'Over-deployed vs Cash',
+                  val: diff,
+                  color: diff >= 0 ? '#38bdf8' : '#fb7185',
+                  signed: true,
+                },
+              ].map((s) => (
+                <Col xs={12} sm={6} key={s.label}>
+                  <div style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.08)',
+                  }}>
+                    <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, display: 'block' }}>
+                      {s.label}
+                    </Text>
+                    <Text className="num-tabular" style={{ color: s.color, fontSize: 17, fontWeight: 700 }}>
+                      {s.signed ? fmtSigned(s.val) : fmt(s.val)}
+                    </Text>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* ── 6 Enterprise Stat Cards ───────────────────────────────────────── */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
         {[
-          { label: 'Total Invested', val: summary?.total_invested ?? 0, cls: 'stat-card-blue', icon: <BankOutlined /> },
-          { label: 'Interest Earned', val: summary?.total_interest ?? 0, cls: 'stat-card-green', icon: <DollarOutlined /> },
-          { label: 'Trading P&L', val: summary?.total_pnl ?? 0, cls: summary?.total_pnl ?? 0 >= 0 ? 'stat-card-green' : 'stat-card-red', icon: summary?.total_pnl ?? 0 >= 0 ? <RiseOutlined /> : <FallOutlined /> },
-          { label: 'Net Portfolio Value', val: summary?.net_value ?? 0, cls: 'stat-card-orange', icon: <RiseOutlined /> },
+          { label: 'Broker Cash (Investment)', val: totalBrokerCash, cls: 'stat-card-blue', icon: <BankOutlined />, tip: 'Total cash added to your broking agency' },
+          { label: 'Holdings Invested (GSec/MF)', val: totalInvested, cls: 'stat-card-purple', icon: <PieChartOutlined />, tip: 'Cost basis of GSec & Mutual Fund holdings' },
+          { label: diff >= 0 ? 'Undeployed Broker Cash' : 'Over-invested vs Cash', val: Math.abs(diff), cls: diff >= 0 ? 'stat-card-green' : 'stat-card-red', icon: <SwapOutlined />, tip: 'Broker cash minus holdings invested' },
+          { label: 'Total Profit', val: totalProfit, cls: totalProfit >= 0 ? 'stat-card-green' : 'stat-card-red', icon: <RiseOutlined />, tip: 'Holding P&L + F&O P&L + Interest Accumulated', signed: true },
+          { label: 'Holdings P&L (GSec/MF)', val: holdingPnl, cls: holdingPnl >= 0 ? 'stat-card-green' : 'stat-card-red', icon: holdingPnl >= 0 ? <RiseOutlined /> : <FallOutlined />, tip: 'Current Value minus Invested Value for holdings', signed: true },
+          { label: 'F&O P&L + Interest', val: fnoPnl + totalInterest, cls: (fnoPnl + totalInterest) >= 0 ? 'stat-card-orange' : 'stat-card-red', icon: <DollarOutlined />, tip: `F&O: ${fmtSigned(fnoPnl)} | Interest: ${fmt(totalInterest)}`, signed: true },
         ].map((s) => (
-          <Col xs={24} sm={12} lg={6} key={s.label}>
-            <Card className={s.cls} style={{ borderRadius: 12, border: 'none' }}>
-              <Statistic
-                title={<Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{s.label}</Text>}
-                value={Math.abs(s.val)}
-                prefix={s.val < 0 ? '- ₹' : '₹'}
-                valueStyle={{ color: '#fff', fontSize: 22, fontWeight: 700 }}
-                formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-              />
-            </Card>
+          <Col xs={24} sm={12} lg={8} key={s.label}>
+            <Tooltip title={s.tip}>
+              <Card className={s.cls} style={{ borderRadius: 14, border: 'none' }}>
+                <Statistic
+                  title={<Text style={{ color: 'rgba(255,255,255,0.88)', fontSize: 13 }}>{s.label}</Text>}
+                  value={Math.abs(s.val)}
+                  prefix={s.signed && s.val < 0 ? '- ₹' : '₹'}
+                  valueStyle={{ color: '#fff', fontSize: 21, fontWeight: 700 }}
+                  formatter={(v) => Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                />
+              </Card>
+            </Tooltip>
           </Col>
         ))}
       </Row>
 
-      {/* Growth Chart */}
-      <Card title="Portfolio Growth" style={{ marginBottom: 24, borderRadius: 12 }}>
-        {summary?.growth_data && summary.growth_data.length > 0 ? (
-          <ResponsiveContainer width="100%" height={300}>
+      {/* ── Cool Unique Feature: Portfolio Intelligence & Target Simulator ─── */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
+        <Col xs={24} lg={12}>
+          <Card
+            className="enterprise-card"
+            title={<Space><PieChartOutlined style={{ color: '#4361ee' }} /><span>Capital Allocation &amp; Profit Attribution</span></Space>}
+            style={{ height: '100%' }}
+          >
+            <Space direction="vertical" style={{ width: '100%' }} size={14}>
+              <div>
+                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Text strong style={{ fontSize: 12 }}>GSec Holdings</Text>
+                  <Text className="num-tabular" style={{ fontSize: 12 }}>{fmt(gsecTotal)} ({((gsecTotal / cashBase) * 100).toFixed(1)}%)</Text>
+                </Space>
+                <Progress percent={Math.min(100, Number(((gsecTotal / cashBase) * 100).toFixed(1)))} strokeColor="#2563eb" showInfo={false} />
+              </div>
+              <div>
+                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Text strong style={{ fontSize: 12 }}>Mutual Fund Holdings</Text>
+                  <Text className="num-tabular" style={{ fontSize: 12 }}>{fmt(mfTotal)} ({((mfTotal / cashBase) * 100).toFixed(1)}%)</Text>
+                </Space>
+                <Progress percent={Math.min(100, Number(((mfTotal / cashBase) * 100).toFixed(1)))} strokeColor="#7c3aed" showInfo={false} />
+              </div>
+              <div>
+                <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Text strong style={{ fontSize: 12 }}>Undeployed Cash / F&amp;O Margin</Text>
+                  <Text className="num-tabular" style={{ fontSize: 12 }}>{fmt(Math.max(0, diff))} ({((Math.max(0, diff) / cashBase) * 100).toFixed(1)}%)</Text>
+                </Space>
+                <Progress percent={Math.min(100, Number(((Math.max(0, diff) / cashBase) * 100).toFixed(1)))} strokeColor="#10b981" showInfo={false} />
+              </div>
+              <Row gutter={8} style={{ paddingTop: 6 }}>
+                <Col span={8}>
+                  <Tag color={holdingPnl >= 0 ? 'green' : 'red'} style={{ width: '100%', textAlign: 'center', padding: '4px 0' }}>
+                    Holdings: {fmtSigned(holdingPnl)}
+                  </Tag>
+                </Col>
+                <Col span={8}>
+                  <Tag color={fnoPnl >= 0 ? 'blue' : 'red'} style={{ width: '100%', textAlign: 'center', padding: '4px 0' }}>
+                    F&amp;O: {fmtSigned(fnoPnl)}
+                  </Tag>
+                </Col>
+                <Col span={8}>
+                  <Tag color="gold" style={{ width: '100%', textAlign: 'center', padding: '4px 0' }}>
+                    Interest: +{fmt(totalInterest)}
+                  </Tag>
+                </Col>
+              </Row>
+            </Space>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <Card
+            className="enterprise-card"
+            title={<Space><ThunderboltOutlined style={{ color: '#f59e0b' }} /><span>Interactive Target Return Simulator</span></Space>}
+            extra={<Tag color="geekblue">{simRate}% p.a.</Tag>}
+            style={{ height: '100%' }}
+          >
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              Slide annual return target on your <Text strong>{fmt(totalBrokerCash)}</Text> broker capital:
+            </Text>
+            <Slider
+              min={5} max={36} step={1} value={simRate} onChange={setSimRate}
+              marks={{ 5: '5%', 10: '10%', 18: '18%', 24: '24%', 36: '36%' }}
+              style={{ marginTop: 12, marginBottom: 24 }}
+            />
+            <Row gutter={[12, 12]}>
+              {[
+                { label: 'Yearly Goal', val: totalBrokerCash * (simRate / 100) },
+                { label: 'Quarterly Goal', val: (totalBrokerCash * (simRate / 100)) / 4 },
+                { label: 'Monthly Goal', val: (totalBrokerCash * (simRate / 100)) / 12 },
+                { label: 'Weekly Goal', val: (totalBrokerCash * (simRate / 100)) / 52 },
+              ].map((g) => (
+                <Col span={12} key={g.label}>
+                  <div style={{ background: '#f8fafc', padding: '8px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                    <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>{g.label}</Text>
+                    <Text strong className="num-tabular" style={{ fontSize: 15, color: '#0f172a' }}>{fmt(g.val)}</Text>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* ── Growth Chart ──────────────────────────────────────────────────── */}
+      <Card className="enterprise-card" title="Portfolio Growth Trajectory" style={{ marginBottom: 20 }}>
+        {summary?.growth_data?.length ? (
+          <ResponsiveContainer width="100%" height={280}>
             <LineChart data={summary.growth_data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="date" tick={{ fontSize: 12 }} />
               <YAxis tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} tick={{ fontSize: 12 }} />
-              <Tooltip formatter={(v: number) => fmt(v)} />
+              <ReTooltip formatter={(v: number) => fmt(v)} />
               <Legend />
-              <Line type="monotone" dataKey="invested" stroke="#4361ee" strokeWidth={2} dot={false} name="Invested" />
-              <Line type="monotone" dataKey="returns" stroke="#52c41a" strokeWidth={2} dot={false} name="Returns" />
-              <Line type="monotone" dataKey="net_value" stroke="#f7971e" strokeWidth={2} dot={false} name="Net Value" />
+              <Line type="monotone" dataKey="invested" stroke="#3b82f6" strokeWidth={2} dot={false} name="Broker Capital" />
+              <Line type="monotone" dataKey="returns" stroke="#10b981" strokeWidth={2} dot={false} name="Cumulative Returns" />
+              <Line type="monotone" dataKey="net_value" stroke="#f59e0b" strokeWidth={2} dot={false} name="Net Value" />
             </LineChart>
           </ResponsiveContainer>
         ) : (
-          <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
-            No trade / interest data for this FY yet. Add investments to see growth.
-          </div>
+          <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>No trade / interest data yet.</div>
         )}
       </Card>
 
-      {/* Add forms */}
-      <Collapse defaultActiveKey={[]} style={{ marginBottom: 24 }}>
-        <Panel header="➕ Add Investment (GSec, Mutual Fund, FD etc.)" key="investment">
-          <Form form={invForm} layout="inline" onFinish={addInvestment}>
-            <Form.Item name="instrument_type" rules={[{ required: true }]}>
-              <Select placeholder="Type" style={{ width: 150 }}>
-                {INSTRUMENT_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
-              </Select>
+      {/* ── Add Forms ─────────────────────────────────────────────────────── */}
+      <Collapse defaultActiveKey={['broker_cash', 'investment']} style={{ marginBottom: 20 }}>
+        <Panel header="💰 Add Cash to Broking Agency (Real Investment)" key="broker_cash">
+          <Form form={cashForm} layout="inline" onFinish={addCash}>
+            <Form.Item name="amount" rules={[{ required: true, message: 'Enter amount' }]}>
+              <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 180 }} min={1} step={1000} />
             </Form.Item>
-            <Form.Item name="name" rules={[{ required: true, message: 'Name required' }]}>
-              <Input placeholder="Name / Scheme" style={{ width: 200 }} />
+            <Form.Item name="cash_date" rules={[{ required: true, message: 'Select date' }]}>
+              <DatePicker placeholder="Date added" />
             </Form.Item>
-            <Form.Item name="invested_value" rules={[{ required: true }]}>
-              <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 160 }} min={0} />
-            </Form.Item>
-            <Form.Item name="investment_date" rules={[{ required: true }]}>
-              <DatePicker placeholder="Date" />
-            </Form.Item>
-            <Form.Item name="notes">
-              <Input placeholder="Notes (optional)" style={{ width: 160 }} />
+            <Form.Item name="description">
+              <Input placeholder="Description (optional)" style={{ width: 220 }} />
             </Form.Item>
             <Form.Item>
-              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add</Button>
+              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Cash</Button>
             </Form.Item>
           </Form>
         </Panel>
 
-        <Panel header="➕ Add Interest / Returns" key="interest">
+        <Panel header="🏛️ Add Holding (GSec / Mutual Fund)" key="investment">
+          <Form form={invForm} layout="inline" onFinish={addHolding}>
+            <Form.Item name="instrument_type" rules={[{ required: true, message: 'Select type' }]}>
+              <Select placeholder="Type" style={{ width: 150 }}>
+                {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item name="name" rules={[{ required: true, message: 'Enter name' }]}>
+              <Input placeholder="Name / Scheme" style={{ width: 200 }} />
+            </Form.Item>
+            <Form.Item name="invested_value" rules={[{ required: true, message: 'Enter invested' }]}>
+              <InputNumber placeholder="Invested (₹)" prefix="₹" style={{ width: 160 }} min={1} />
+            </Form.Item>
+            <Form.Item name="current_value">
+              <InputNumber placeholder="Current Value (₹)" prefix="₹" style={{ width: 170 }} min={0} />
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Holding</Button>
+            </Form.Item>
+          </Form>
+        </Panel>
+
+        <Panel header="➕ Add Interest / Returns Accumulated" key="interest">
           <Form form={intForm} layout="inline" onFinish={addInterest}>
             <Form.Item name="amount" rules={[{ required: true }]}>
-              <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 160 }} min={0} />
+              <InputNumber placeholder="Amount (₹)" prefix="₹" style={{ width: 160 }} min={1} />
             </Form.Item>
             <Form.Item name="interest_date" rules={[{ required: true }]}>
               <DatePicker placeholder="Date" />
@@ -227,33 +679,142 @@ export default function HomePage() {
               <Input placeholder="Description (optional)" style={{ width: 220 }} />
             </Form.Item>
             <Form.Item>
-              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add</Button>
+              <Button type="primary" htmlType="submit" icon={<PlusOutlined />}>Add Interest</Button>
             </Form.Item>
           </Form>
         </Panel>
       </Collapse>
 
-      {/* Investments table */}
-      <Card title="Investments" style={{ marginBottom: 24, borderRadius: 12 }}>
-        <Table
-          dataSource={investments}
-          columns={invColumns}
-          rowKey="id"
-          size="small"
-          pagination={{ pageSize: 10 }}
+      {/* ── All Broker Cash Entries Table ─────────────────────────────────── */}
+      <Card
+        className="enterprise-card"
+        title={<Space><BankOutlined style={{ color: '#2563eb' }} /><span>All Broker Cash Entries</span><Tag color="blue">{brokerCash.length} entries • {fmt(totalBrokerCash)}</Tag></Space>}
+        style={{ marginBottom: 20 }}
+      >
+        <Table dataSource={brokerCash} columns={cashColumns} rowKey="id" size="small" pagination={false}
+          summary={() => (
+            <Table.Summary.Row>
+              <Table.Summary.Cell index={0} align="right"><Text strong>{fmt(totalBrokerCash)}</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={1}><Text strong>Total Cash Added</Text></Table.Summary.Cell>
+              <Table.Summary.Cell index={2} colSpan={2} />
+            </Table.Summary.Row>
+          )}
         />
       </Card>
 
-      {/* Interest table */}
-      <Card title="Interest / Returns" style={{ borderRadius: 12 }}>
-        <Table
-          dataSource={interests}
-          columns={intColumns}
-          rowKey="id"
-          size="small"
-          pagination={{ pageSize: 10 }}
+      {/* ── Holdings Table (GSec & Mutual Funds Only) ─────────────────────── */}
+      <Card
+        className="enterprise-card"
+        title={
+          <Space wrap>
+            <span>Holdings (GSec &amp; Mutual Funds)</span>
+            <Tag color="blue">Invested: {fmt(totalInvested)}</Tag>
+            <Tag color={holdingPnl >= 0 ? 'green' : 'red'}>Holding P&amp;L: {fmtSigned(holdingPnl)}</Tag>
+            <Tag color={diff >= 0 ? 'cyan' : 'red'}>
+              {diff >= 0 ? `Undeployed Cash: ${fmt(diff)}` : `Over-invested: ${fmt(Math.abs(diff))}`}
+            </Tag>
+          </Space>
+        }
+        style={{ marginBottom: 20 }}
+      >
+        <Table dataSource={investments} columns={holdingColumns} rowKey="id" size="small" pagination={false}
+          summary={() => {
+            const totalCv = investments.reduce((s, r) => r.current_value != null ? s + Number(r.current_value) : s, 0)
+            return (
+              <Table.Summary.Row>
+                <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total Holdings</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={2} align="right"><Text strong>{fmt(totalInvested)}</Text></Table.Summary.Cell>
+                <Table.Summary.Cell index={3} align="right">
+                  <Text strong style={{ color: '#2563eb' }}>{totalCv > 0 ? fmt(totalCv) : '—'}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={4} align="right">
+                  <Text strong style={{ color: holdingPnl >= 0 ? '#10b981' : '#ef4444' }}>
+                    {fmtSigned(holdingPnl)}
+                  </Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={5} />
+              </Table.Summary.Row>
+            )
+          }}
         />
       </Card>
+
+      {/* ── Interest Table ────────────────────────────────────────────────── */}
+      <Card className="enterprise-card" title="Interest Accumulated">
+        <Table dataSource={interests} columns={intColumns} rowKey="id" size="small" pagination={{ pageSize: 10 }} />
+      </Card>
+
+      {/* ── Edit Holding Modal ────────────────────────────────────────────── */}
+      <Modal
+        title={`Edit Holding — ${editingHolding?.name ?? ''}`}
+        open={editHoldingOpen}
+        onCancel={() => setEditHoldingOpen(false)}
+        onOk={() => editHoldingForm.submit()}
+        okText="Save Changes"
+      >
+        <Form form={editHoldingForm} layout="vertical" onFinish={saveEditHolding}>
+          <Form.Item name="instrument_type" label="Type" rules={[{ required: true }]}>
+            <Select>
+              {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
+            </Select>
+          </Form.Item>
+          <Form.Item name="name" label="Name / Scheme" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="invested_value" label="Invested Value (₹)" rules={[{ required: true }]}>
+            <InputNumber min={1} prefix="₹" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="current_value" label="Current Value (₹)">
+            <InputNumber min={0} prefix="₹" style={{ width: '100%' }} placeholder="Enter current market value" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── Edit Broker Cash Modal ────────────────────────────────────────── */}
+      <Modal
+        title="Edit Broker Cash Entry"
+        open={editCashOpen}
+        onCancel={() => setEditCashOpen(false)}
+        onOk={() => editCashForm.submit()}
+        okText="Save Changes"
+      >
+        <Form form={editCashForm} layout="vertical" onFinish={saveEditCash}>
+          <Form.Item name="amount" label="Amount (₹)" rules={[{ required: true }]}>
+            <InputNumber min={1} prefix="₹" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="cash_date" label="Date Added" rules={[{ required: true }]}>
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ── Carry Forward Modal ───────────────────────────────────────────── */}
+      <Modal
+        title="📦 Carry Forward Holdings &amp; Cash to Next FY"
+        open={carryModalOpen}
+        onCancel={() => setCarryModalOpen(false)}
+        footer={null}
+      >
+        <Form layout="vertical" onFinish={doCarryForward} initialValues={{ from_fy: financialYears[1] ?? '', to_fy: financialYears[0] ?? '' }}>
+          <Form.Item name="from_fy" label="Copy FROM Financial Year" rules={[{ required: true }]}>
+            <Select>{financialYears.map((y) => <Option key={y} value={y}>{y}</Option>)}</Select>
+          </Form.Item>
+          <Form.Item name="to_fy" label="Copy INTO Financial Year" rules={[{ required: true }]}>
+            <Select>{financialYears.map((y) => <Option key={y} value={y}>{y}</Option>)}</Select>
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={carryLoading} block icon={<ForwardOutlined />}>
+              Carry Forward Holdings &amp; Cash
+            </Button>
+          </Form.Item>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Duplicates are automatically skipped. Targets will be recalculated automatically.
+          </Text>
+        </Form>
+      </Modal>
     </Spin>
   )
 }

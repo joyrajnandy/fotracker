@@ -21,3 +21,4 @@ class User(Base):
     investments = relationship("Investment", back_populates="user", cascade="all, delete-orphan")
     interests = relationship("Interest", back_populates="user", cascade="all, delete-orphan")
     targets = relationship("Target", back_populates="user", cascade="all, delete-orphan")
+    broker_cash = relationship("BrokerCash", back_populates="user", cascade="all, delete-orphan")

@@ -100,8 +100,8 @@ export default function LoginPage() {
                   <Form.Item name="email" rules={[{ required: true, type: 'email', message: 'Valid email required' }]}>
                     <Input prefix={<MailOutlined />} placeholder="Email" />
                   </Form.Item>
-                  <Form.Item name="password" rules={[{ required: true, min: 6, message: 'Min 6 characters' }]}>
-                    <Input.Password prefix={<LockOutlined />} placeholder="Password" />
+                  <Form.Item name="password" rules={[{ required: true, min: 8, message: 'Min 8 characters' }]}>
+                    <Input.Password prefix={<LockOutlined />} placeholder="Password (min 8 chars)" />
                   </Form.Item>
                   <Form.Item>
                     <Button type="primary" htmlType="submit" block loading={loading}

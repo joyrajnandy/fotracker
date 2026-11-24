@@ -2,33 +2,85 @@
 
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #f0f2f5;
-  color: #1a1a2e;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f4f6fb;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root { min-height: 100vh; }
 
+/* Tabular numbers for financial precision */
+.num-tabular, .ant-statistic-content-value, .ant-table-cell {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #f0f2f5; }
-::-webkit-scrollbar-thumb { background: #d9d9d9; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #bfbfbf; }
+::-webkit-scrollbar-track { background: #f1f5f9; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* Ant Design overrides for enterprise light theme */
-.ant-layout { background: #f0f2f5; }
-.ant-layout-sider { box-shadow: 2px 0 8px rgba(0,0,0,0.08); }
-.ant-card { border-radius: 8px; }
-.ant-table-thead > tr > th { background: #fafafa; font-weight: 600; }
+/* Enterprise Layout & Cards */
+.ant-layout { background: #f4f6fb; }
+.ant-layout-sider {
+  background: linear-gradient(180deg, #0b1120 0%, #0f172a 100%) !important;
+  box-shadow: 4px 0 24px rgba(15, 23, 42, 0.14);
+}
+.ant-menu-dark { background: transparent !important; }
+.ant-menu-dark .ant-menu-item-selected {
+  background: linear-gradient(90deg, #4361ee 0%, #3b82f6 100%) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(67, 97, 238, 0.35);
+}
+.ant-menu-dark .ant-menu-item {
+  margin: 4px 10px !important;
+  width: calc(100% - 20px) !important;
+  border-radius: 8px !important;
+}
+
+.enterprise-card {
+  border-radius: 14px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04) !important;
+  background: #ffffff !important;
+}
+
+.ant-table-thead > tr > th {
+  background: #f8fafc !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 
 /* Upload area */
-.upload-dragger .ant-upload-drag { border-radius: 8px; }
+.upload-dragger .ant-upload-drag { border-radius: 12px; }
 
 /* Target cards */
-.target-card-achieved { border-left: 4px solid #52c41a !important; }
-.target-card-pending  { border-left: 4px solid #ff4d4f !important; }
+.target-card-achieved { border-left: 4px solid #10b981 !important; }
+.target-card-pending  { border-left: 4px solid #ef4444 !important; }
 
-.stat-card-blue   { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; }
-.stat-card-green  { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); color: #fff; }
-.stat-card-orange { background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%); color: #fff; }
-.stat-card-red    { background: linear-gradient(135deg, #f953c6 0%, #b91d73 100%); color: #fff; }
+/* Enterprise Stat Cards */
+.stat-card-blue   { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: #fff; box-shadow: 0 8px 20px rgba(59, 130, 246, 0.22); }
+.stat-card-green  { background: linear-gradient(135deg, #065f46 0%, #10b981 100%); color: #fff; box-shadow: 0 8px 20px rgba(16, 185, 129, 0.22); }
+.stat-card-orange { background: linear-gradient(135deg, #b45309 0%, #f59e0b 100%); color: #fff; box-shadow: 0 8px 20px rgba(245, 158, 11, 0.22); }
+.stat-card-red    { background: linear-gradient(135deg, #9f1239 0%, #f43f5e 100%); color: #fff; box-shadow: 0 8px 20px rgba(244, 63, 94, 0.22); }
+.stat-card-purple { background: linear-gradient(135deg, #312e81 0%, #6366f1 100%); color: #fff; box-shadow: 0 8px 20px rgba(99, 102, 241, 0.22); }
+
+.row-future { opacity: 0.55; }
+.row-achieved { background: #f0fdf4; }
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
