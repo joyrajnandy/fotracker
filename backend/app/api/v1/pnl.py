@@ -25,7 +25,7 @@ def pnl_summary(
 def update_brokerage(
     financial_year: str = Query(default=None),
     custom_total_brokerage: Optional[float] = Body(default=None, ge=0),
-    per_trade_fee: float = Body(default=69.0, ge=0),
+    per_trade_fee: float = Body(default=25.7, ge=0),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):

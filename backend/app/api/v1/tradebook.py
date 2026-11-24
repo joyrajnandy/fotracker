@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.trade import TradeUploadResponse, TradeListResponse
-from app.services.trade_service import upload_trades_csv, get_trades
+from app.services.trade_service import upload_trades_csv, get_trades, delete_trades
 from app.utils.financial_year import get_current_financial_year
 
 router = APIRouter(prefix="/tradebook", tags=["Tradebook"])
@@ -20,7 +20,7 @@ async def upload_csv(
     """Upload a CSV file of trades. Duplicates are skipped automatically."""
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are accepted")
-    max_size = 10 * 1024 * 1024  # 10 MB limit
+    max_size = 10 * 1024 * 1024
     content = await file.read()
     if len(content) > max_size:
         raise HTTPException(status_code=413, detail="CSV file exceeds 10 MB limit")
@@ -39,3 +39,14 @@ def list_trades(
 ):
     fy = financial_year or get_current_financial_year()
     return get_trades(db, current_user.id, fy, page, page_size, symbol, trade_type)
+
+
+@router.delete("/trades")
+def clear_trades(
+    financial_year: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete trades for the given financial year (or all if omitted) so user can re-upload."""
+    deleted = delete_trades(db, current_user.id, financial_year)
+    return {"deleted": deleted, "financial_year": financial_year}

@@ -119,16 +119,21 @@ export default function HomePage() {
   // ── Live LTP helpers ──────────────────────────────────────────────────────
   async function fetchLtpForForm(formInstance: any) {
     const code = formInstance.getFieldValue('instrument_code')
+    const name = formInstance.getFieldValue('name')
     const type = formInstance.getFieldValue('instrument_type')
-    if (!code) {
-      message.warning('Enter an Instrument Code first (e.g. AMFI code 119551 or GOLDBEES.NS)')
+    const queryCode = code || name
+    if (!queryCode) {
+      message.warning('Enter an Instrument Code or Name first (e.g. AMFI code 119551 or GOLDBEES.NS)')
       return
     }
     setFetchingSingleLtp(true)
     try {
-      const { data } = await marketApi.getLtp(code, type)
+      const { data } = await marketApi.getLtp(queryCode, type, name)
       formInstance.setFieldValue('ltp', data.ltp)
-      if (!formInstance.getFieldValue('name') && data.name) {
+      if (!code && data.matched_code) {
+        formInstance.setFieldValue('instrument_code', data.matched_code)
+      }
+      if (!name && data.name) {
         formInstance.setFieldValue('name', data.name)
       }
       message.success(`Live LTP fetched from ${data.source}: ₹${data.ltp}`)
@@ -143,7 +148,10 @@ export default function HomePage() {
     setLtpRefreshing(true)
     try {
       const { data } = await homeApi.refreshAllLtp(fy)
-      message.success(`Updated live LTP for ${data.updated} holding(s)`)
+      message.success(`Updated live LTP for ${data.updated} of ${data.total} holding(s)`)
+      if (data.failed?.length) {
+        message.warning(`Could not match LTP for: ${data.failed.join(', ')}. Add AMFI code or NSE/BSE ticker.`)
+      }
       refreshData()
     } catch {
       message.error('Failed to refresh LTPs')

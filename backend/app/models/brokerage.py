@@ -10,7 +10,7 @@ class BrokerageSetting(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     financial_year = Column(String(10), nullable=False)
-    per_trade_fee = Column(Numeric(10, 2), nullable=False, default=69.00)
+    per_trade_fee = Column(Numeric(10, 2), nullable=False, default=25.70)
     custom_total_brokerage = Column(Numeric(15, 2), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

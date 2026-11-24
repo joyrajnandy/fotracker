@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
+import httpx
 from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.user import User
 from app.services.portfolio_service import get_home_summary
 from app.services.pnl_service import calculate_pnl
 from app.services.target_service import get_target_achievement
+from app.api.v1.market import _fetch_yahoo_quote
 from app.utils.financial_year import get_current_financial_year
 
 router = APIRouter(prefix="/ai", tags=["AI Strategist"])
@@ -144,4 +146,77 @@ def get_ai_insights(
             "brokerage_drag_pct": round((brokerage / abs(pnl["gross_net_pnl"])) * 100, 1) if pnl["gross_net_pnl"] else 0.0,
         },
         "suggestions": suggestions[:4],
+    }
+
+
+@router.get("/market-bot")
+async def get_market_bot_summary(
+    financial_year: str = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generic, non-predictive, non-advisory bot summary of live SENSEX & NIFTY levels,
+    current expiry realized status, and account capital status.
+    """
+    fy = financial_year or get_current_financial_year()
+    summary = get_home_summary(db, current_user.id, fy)
+    pnl = calculate_pnl(db, current_user.id, fy)
+
+    async with httpx.AsyncClient() as client:
+        nifty = await _fetch_yahoo_quote(client, "^NSEI", "NIFTY 50")
+        sensex = await _fetch_yahoo_quote(client, "^BSESN", "SENSEX")
+
+    expiries = pnl["by_expiry"]
+    latest_nifty = next((e for e in expiries if "NIFTY" in e["symbol_base"].upper()), None)
+    latest_sensex = next((e for e in expiries if "SENSEX" in e["symbol_base"].upper()), None)
+
+    notes = []
+
+    for idx_q, label in ((nifty, "NIFTY 50"), (sensex, "SENSEX")):
+        if idx_q.get("live") and idx_q.get("price") is not None:
+            direction = "higher" if (idx_q["change"] or 0) >= 0 else "lower"
+            notes.append(
+                f"{label} is currently at {idx_q['price']:,.2f} ({idx_q['change']:+,.2f} / "
+                f"{idx_q['change_pct']:+.2f}% {direction} vs previous close), "
+                f"intraday range {idx_q['day_low']:,.2f} – {idx_q['day_high']:,.2f}."
+            )
+        else:
+            notes.append(f"{label} live quote is currently unavailable.")
+
+    if latest_nifty:
+        notes.append(
+            f"Latest NIFTY expiry ({latest_nifty['expiry_date'] or 'N/A'}) shows "
+            f"net realized P&L of ₹{latest_nifty['realized_pnl']:+,.2f} across {latest_nifty['trades_count']} trades."
+        )
+    if latest_sensex:
+        notes.append(
+            f"Latest SENSEX expiry ({latest_sensex['expiry_date'] or 'N/A'}) shows "
+            f"net realized P&L of ₹{latest_sensex['realized_pnl']:+,.2f} across {latest_sensex['trades_count']} trades."
+        )
+
+    broker_cash = summary["total_broker_cash"]
+    undeployed = summary["broker_vs_invested_diff"]
+    if broker_cash > 0:
+        deployed_pct = round(((broker_cash - max(0, undeployed)) / broker_cash) * 100, 1)
+        notes.append(
+            f"Account status: ₹{broker_cash:,.2f} broker cash, {deployed_pct}% allocated to GSec/MF holdings, "
+            f"₹{undeployed:,.2f} undeployed cash, total profit ₹{summary['total_profit']:+,.2f}."
+        )
+    else:
+        notes.append("No broker cash entries recorded for this financial year yet.")
+
+    return {
+        "financial_year": fy,
+        "indices": [nifty, sensex],
+        "latest_nifty_expiry": latest_nifty,
+        "latest_sensex_expiry": latest_sensex,
+        "account": {
+            "broker_cash": broker_cash,
+            "undeployed_cash": undeployed,
+            "total_profit": summary["total_profit"],
+            "net_value": summary["net_value"],
+        },
+        "observations": notes,
+        "disclaimer": "Informational summary only. Does not predict market direction or design trading strategies.",
     }

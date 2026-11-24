@@ -20,7 +20,6 @@ def upload_trades_csv(db: Session, user_id: int, file_content: bytes) -> dict:
     if missing:
         raise HTTPException(status_code=400, detail=f"Missing CSV columns: {missing}")
 
-    # Normalise column names
     df.columns = df.columns.str.strip()
 
     inserted, skipped, errors = 0, 0, []
@@ -54,18 +53,27 @@ def upload_trades_csv(db: Session, user_id: int, file_content: bytes) -> dict:
                 expiry_date=expiry_date,
                 financial_year=fy,
             )
-            db.add(trade)
-            db.flush()
+            # Use a savepoint per row so a duplicate never rolls back earlier valid rows
+            with db.begin_nested():
+                db.add(trade)
+                db.flush()
             inserted += 1
         except IntegrityError:
-            db.rollback()
             skipped += 1
         except Exception as e:
-            db.rollback()
             errors.append(f"Row {idx + 2}: {str(e)}")
 
     db.commit()
     return {"total_rows": len(df), "inserted": inserted, "skipped_duplicates": skipped, "errors": errors}
+
+
+def delete_trades(db: Session, user_id: int, financial_year: Optional[str] = None) -> int:
+    query = db.query(Trade).filter(Trade.user_id == user_id)
+    if financial_year:
+        query = query.filter(Trade.financial_year == financial_year)
+    deleted = query.delete(synchronize_session=False)
+    db.commit()
+    return deleted
 
 
 def get_trades(

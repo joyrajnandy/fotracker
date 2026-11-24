@@ -16,7 +16,7 @@ from app.services.portfolio_service import (
     add_investment, update_investment, add_interest, update_interest, delete_interest,
     get_home_summary, update_investment_current_value, carry_forward,
 )
-from app.api.v1.market import _fetch_yahoo_quote
+from app.api.v1.market import resolve_live_ltp
 from app.utils.financial_year import get_current_financial_year, get_available_financial_years
 
 router = APIRouter(prefix="/home", tags=["Home"])
@@ -73,7 +73,7 @@ async def refresh_all_ltp(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Refresh live LTP & Current Value for all GSec/MF holdings that have an instrument_code."""
+    """Refresh live LTP & Current Value for all GSec/MF holdings."""
     fy = financial_year or get_current_financial_year()
     holdings = (
         db.query(Investment)
@@ -81,41 +81,26 @@ async def refresh_all_ltp(
             Investment.user_id == current_user.id,
             Investment.financial_year == fy,
             Investment.instrument_type.in_(["GSec", "Mutual Fund"]),
-            Investment.instrument_code.isnot(None),
         )
         .all()
     )
     updated = 0
+    failed = []
     async with httpx.AsyncClient() as client:
         for h in holdings:
-            code = (h.instrument_code or "").strip()
-            if not code:
-                continue
-            live_price = None
-            if code.isdigit():
-                try:
-                    resp = await client.get(f"https://api.mfapi.in/mf/{code}/latest", timeout=5.0)
-                    resp.raise_for_status()
-                    data = resp.json().get("data") or []
-                    if data:
-                        live_price = float(data[0]["nav"])
-                except Exception:
-                    pass
-            else:
-                candidates = [code] if ("." in code or code.startswith("^")) else [code, f"{code}.NS", f"{code}.BO"]
-                for sym in candidates:
-                    q = await _fetch_yahoo_quote(client, sym, sym)
-                    if q["live"] and q["price"] is not None:
-                        live_price = q["price"]
-                        break
-            if live_price is not None:
+            res = await resolve_live_ltp(client, h.instrument_code, h.instrument_type, h.name)
+            if res and res.get("ltp") is not None:
                 qty = Decimal(str(h.quantity or 1))
-                ltp_dec = Decimal(str(round(live_price, 4)))
+                ltp_dec = Decimal(str(round(float(res["ltp"]), 4)))
                 h.ltp = ltp_dec
                 h.current_value = round(qty * ltp_dec, 2)
+                if not h.instrument_code and res.get("matched_code"):
+                    h.instrument_code = res["matched_code"][:60]
                 updated += 1
+            else:
+                failed.append(h.name)
     db.commit()
-    return {"updated": updated}
+    return {"updated": updated, "total": len(holdings), "failed": failed}
 
 
 @router.get("/investments", response_model=List[InvestmentOut])

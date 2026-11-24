@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/services/api'
+import MarketBot from '@/components/MarketBot/MarketBot'
 import type { MenuProps } from 'antd'
 
 const { Header, Sider, Content } = Layout
@@ -220,6 +221,8 @@ export default function AppLayout() {
           <Outlet />
         </Content>
       </Layout>
+
+      <MarketBot />
 
       <Modal
         title="🔐 Admin Registration Invite (Valid 10 Minutes)"

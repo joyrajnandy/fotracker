@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react'
 import {
   Card, Table, Button, Upload, Space, Select, Typography,
-  Tag, Modal, Descriptions, Progress, message, Row, Col, Statistic, Spin, Grid,
+  Tag, Modal, Descriptions, Progress, message, Row, Col, Spin, Grid, Popconfirm,
 } from 'antd'
-import { UploadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons'
+import { UploadOutlined, FilterOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import type { UploadProps } from 'antd'
 import { tradebookApi, homeApi } from '@/services/api'
 import type { Trade, TradeListResponse, TradeUploadResponse } from '@/types'
@@ -45,6 +45,20 @@ export default function TradeBookPage() {
       })
       setData(res)
       setPage(p)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function clearFyTrades() {
+    if (!fy) return
+    setLoading(true)
+    try {
+      const { data: res } = await tradebookApi.deleteTrades(fy)
+      message.success(`Deleted ${res.deleted} trades for FY ${fy}`)
+      fetchTrades(1)
+    } catch {
+      message.error('Failed to delete trades')
     } finally {
       setLoading(false)
     }
@@ -105,6 +119,15 @@ export default function TradeBookPage() {
             <Button type="primary" icon={<UploadOutlined />}>Upload CSV</Button>
           </Upload>
           <Button icon={<ReloadOutlined />} onClick={() => fetchTrades(1)}>Refresh</Button>
+          <Popconfirm
+            title={`Delete all trades for FY ${fy}?`}
+            description="You can re-upload the CSV right after deleting."
+            onConfirm={clearFyTrades}
+            okText="Delete"
+            okButtonProps={{ danger: true }}
+          >
+            <Button danger icon={<DeleteOutlined />}>Delete Trades</Button>
+          </Popconfirm>
         </Space>
       </Space>
 

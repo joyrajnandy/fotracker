@@ -31,6 +31,7 @@ export default function PnLPage() {
   const [graphScope, setGraphScope] = useState<string>('TOP20')
   const [editingBrokerage, setEditingBrokerage] = useState(false)
   const [customBrokerage, setCustomBrokerage] = useState<number>(0)
+  const [perTradeFee, setPerTradeFee] = useState<number>(25.7)
 
   useEffect(() => {
     homeApi.getFinancialYears().then(({ data }) => {
@@ -46,6 +47,7 @@ export default function PnLPage() {
       .then(({ data }) => {
         setSummary(data)
         setCustomBrokerage(data.total_brokerage)
+        setPerTradeFee(data.per_trade_fee ?? 25.7)
       })
       .finally(() => setLoading(false))
   }, [fy])
@@ -54,10 +56,17 @@ export default function PnLPage() {
     if (!fy) return
     setLoading(true)
     try {
-      const { data } = await pnlApi.updateBrokerage(fy, customBrokerage, 69)
+      const autoChanged = summary && Math.abs(customBrokerage - summary.total_brokerage) > 0.01
+      const { data } = await pnlApi.updateBrokerage(
+        fy,
+        autoChanged ? customBrokerage : null,
+        perTradeFee,
+      )
       setSummary(data)
+      setCustomBrokerage(data.total_brokerage)
+      setPerTradeFee(data.per_trade_fee)
       setEditingBrokerage(false)
-      message.success('Total brokerage updated')
+      message.success('Brokerage updated')
     } catch {
       message.error('Failed to update brokerage')
     } finally {
@@ -69,11 +78,12 @@ export default function PnLPage() {
     if (!fy) return
     setLoading(true)
     try {
-      const { data } = await pnlApi.updateBrokerage(fy, null, 69)
+      const { data } = await pnlApi.updateBrokerage(fy, null, 25.7)
       setSummary(data)
       setCustomBrokerage(data.total_brokerage)
+      setPerTradeFee(25.7)
       setEditingBrokerage(false)
-      message.success('Brokerage reset to ₹69 per trade')
+      message.success('Brokerage reset to ₹25.70 per trade')
     } catch {
       message.error('Failed to reset brokerage')
     } finally {
@@ -171,7 +181,7 @@ export default function PnLPage() {
         <div>
           <Title level={3} style={{ margin: 0 }}>Profit &amp; Loss Analytics</Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Weekly Expiry Performance across SENSEX &amp; NIFTY (Net of ₹69/trade Brokerage)
+            Weekly Expiry Performance across SENSEX &amp; NIFTY (Net of ₹{summary?.per_trade_fee ?? 25.7}/trade Brokerage)
           </Text>
         </div>
         <Space wrap>
@@ -246,9 +256,9 @@ export default function PnLPage() {
         style={{ marginBottom: 20 }}
         title={
           <Space>
-            <span>Brokerage &amp; Charges (₹69 / Trade)</span>
+            <span>Brokerage &amp; Charges (₹{summary?.per_trade_fee ?? 25.7} / Trade)</span>
             {summary?.is_custom_brokerage
-              ? <Tag color="orange">Custom Override Active</Tag>
+              ? <Tag color="orange">Custom Total Active</Tag>
               : <Tag color="blue">Auto Calculated</Tag>}
           </Space>
         }
@@ -256,11 +266,11 @@ export default function PnLPage() {
           editingBrokerage ? (
             <Space>
               <Button type="primary" size="small" icon={<CheckOutlined />} onClick={saveBrokerage}>Save</Button>
-              <Button size="small" icon={<UndoOutlined />} onClick={resetBrokerage}>Reset to ₹69/trade</Button>
+              <Button size="small" icon={<UndoOutlined />} onClick={resetBrokerage}>Reset ₹25.7</Button>
             </Space>
           ) : (
             <Button size="small" icon={<EditOutlined />} onClick={() => setEditingBrokerage(true)}>
-              Edit Total Brokerage
+              Edit Brokerage
             </Button>
           )
         }
@@ -276,11 +286,26 @@ export default function PnLPage() {
           </Col>
           <Col xs={12} sm={6}>
             <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
-              Auto ({summary?.total_trades ?? 0} × ₹{summary?.per_trade_fee ?? 69})
+              Per-Trade Rate ({summary?.total_trades ?? 0} trades)
             </Text>
-            <Text strong className="num-tabular" style={{ fontSize: 17 }}>
-              {fmt(summary?.calculated_brokerage ?? 0)}
-            </Text>
+            {editingBrokerage ? (
+              <InputNumber
+                min={0}
+                step={0.1}
+                prefix="₹"
+                value={perTradeFee}
+                onChange={(v) => {
+                  const rate = Number(v ?? 0)
+                  setPerTradeFee(rate)
+                  setCustomBrokerage(Number(((summary?.total_trades ?? 0) * rate).toFixed(2)))
+                }}
+                style={{ width: 130 }}
+              />
+            ) : (
+              <Text strong className="num-tabular" style={{ fontSize: 17 }}>
+                ₹{summary?.per_trade_fee ?? 25.7} ({fmt(summary?.calculated_brokerage ?? 0)})
+              </Text>
+            )}
           </Col>
           <Col xs={12} sm={6}>
             <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Applied Total Brokerage</Text>

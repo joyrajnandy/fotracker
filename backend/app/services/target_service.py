@@ -115,7 +115,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     ).all()
 
     b_setting = get_or_create_brokerage_setting(db, user_id, financial_year)
-    per_trade_fee = float(b_setting.per_trade_fee or 69.0)
+    per_trade_fee = float(b_setting.per_trade_fee if b_setting.per_trade_fee is not None else 25.7)
 
     cash_entries = (
         db.query(BrokerCash)

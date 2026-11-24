@@ -23,7 +23,7 @@ def get_or_create_brokerage_setting(db: Session, user_id: int, financial_year: s
         setting = BrokerageSetting(
             user_id=user_id,
             financial_year=financial_year,
-            per_trade_fee=69.00,
+            per_trade_fee=25.70,
             custom_total_brokerage=None,
         )
         db.add(setting)
@@ -37,7 +37,7 @@ def set_brokerage_setting(
     user_id: int,
     financial_year: str,
     custom_total_brokerage: Optional[float],
-    per_trade_fee: float = 69.0,
+    per_trade_fee: float = 25.7,
 ) -> BrokerageSetting:
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
     setting.per_trade_fee = per_trade_fee
@@ -54,7 +54,7 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
         .all()
     )
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
-    per_trade_fee = float(setting.per_trade_fee or 69.0)
+    per_trade_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 25.7)
     total_trades = len(trades)
     calculated_brokerage = round(total_trades * per_trade_fee, 2)
     is_custom = setting.custom_total_brokerage is not None
@@ -128,7 +128,7 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
     }
 
 
-def calculate_period_pnl(trades: list, start_date: date, end_date: date, per_trade_fee: float = 69.0) -> float:
+def calculate_period_pnl(trades: list, start_date: date, end_date: date, per_trade_fee: float = 25.7) -> float:
     """Net period P&L after deducting brokerage per trade."""
     period = [t for t in trades if start_date <= t.trade_date <= end_date]
     buy = sum(float(t.quantity) * float(t.price) for t in period if t.trade_type == "buy")
