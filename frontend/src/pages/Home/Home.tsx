@@ -105,7 +105,7 @@ export default function HomePage() {
   useEffect(() => {
     homeApi.getFinancialYears().then(({ data }) => {
       setFinancialYears(data.years)
-      setFy(data.years[0])
+      setFy(data.current_fy || data.years[0])
     })
   }, [])
 
@@ -613,6 +613,11 @@ export default function HomePage() {
               </Text>
               <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>
                 Annualised return on broker cash added
+                {totalBrokerCash > 0 && (
+                  <> • Abs Return: <strong style={{ color: totalProfit >= 0 ? '#34d399' : '#fb7185' }}>
+                    {((totalProfit / totalBrokerCash) * 100).toFixed(2)}%
+                  </strong></>
+                )}
               </Text>
             </Space>
           </Col>

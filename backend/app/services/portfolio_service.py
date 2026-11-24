@@ -315,9 +315,46 @@ def carry_forward(db: Session, user_id: int, from_fy: str, to_fy: str) -> dict:
     }
 
 
+def _auto_carry_forward_if_empty(db: Session, user_id: int, target_fy: str):
+    """
+    If target_fy has no BrokerCash and no GSec/MF holdings yet, automatically
+    carry forward from the most recent prior FY that has data.
+    """
+    has_cash = db.query(BrokerCash.id).filter(
+        BrokerCash.user_id == user_id, BrokerCash.financial_year == target_fy
+    ).first()
+    has_inv = db.query(Investment.id).filter(
+        Investment.user_id == user_id,
+        Investment.financial_year == target_fy,
+        Investment.instrument_type.in_(["GSec", "Mutual Fund"]),
+    ).first()
+    if has_cash or has_inv:
+        return
+
+    prior_cash_fys = [
+        r[0] for r in db.query(BrokerCash.financial_year)
+        .filter(BrokerCash.user_id == user_id, BrokerCash.financial_year < target_fy)
+        .distinct().all()
+    ]
+    prior_inv_fys = [
+        r[0] for r in db.query(Investment.financial_year)
+        .filter(
+            Investment.user_id == user_id,
+            Investment.financial_year < target_fy,
+            Investment.instrument_type.in_(["GSec", "Mutual Fund"]),
+        )
+        .distinct().all()
+    ]
+    prior_fys = sorted(set(prior_cash_fys + prior_inv_fys), reverse=True)
+    if prior_fys:
+        carry_forward(db, user_id, prior_fys[0], target_fy)
+
+
 # ─────────────────────────── Home Summary ─────────────────────────────────────
 
 def get_home_summary(db: Session, user_id: int, financial_year: str) -> dict:
+    _auto_carry_forward_if_empty(db, user_id, financial_year)
+
     # Holdings are strictly GSec & Mutual Fund
     investments = (
         db.query(Investment)

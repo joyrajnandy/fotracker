@@ -24,7 +24,8 @@ router = APIRouter(prefix="/home", tags=["Home"])
 
 @router.get("/financial-years")
 def financial_years():
-    return {"years": get_available_financial_years()}
+    current_fy = get_current_financial_year()
+    return {"years": get_available_financial_years(), "current_fy": current_fy}
 
 
 @router.get("/summary", response_model=HomeSummary)

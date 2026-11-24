@@ -19,11 +19,11 @@ def get_financial_year_dates(fy: str):
     return date(start_year, 4, 1), date(start_year + 1, 3, 31)
 
 
-def get_available_financial_years(start_year: int = 2023) -> list:
-    """Returns descending list of financial years from start_year to current."""
+def get_available_financial_years(advance_years: int = 4) -> list:
+    """Returns current financial year plus 4 advance financial years (no prior years)."""
     today = date.today()
     current_start = today.year if today.month >= 4 else today.year - 1
     return [
         f"{y}-{str(y + 1)[-2:]}"
-        for y in range(current_start, start_year - 1, -1)
+        for y in range(current_start, current_start + advance_years + 1)
     ]
