@@ -2,7 +2,10 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BASE_DIR not in sys.path:
+    sys.path.insert(0, _BASE_DIR)
+os.chdir(_BASE_DIR)
 os.environ.setdefault("DISABLE_BACKGROUND_FEEDER", "true")
 
 from a2wsgi import ASGIMiddleware

@@ -6,6 +6,7 @@ import asyncio
 import csv
 import io
 import json
+import os
 import re
 import time
 import zipfile
@@ -379,6 +380,9 @@ async def stream_market_indices(token: str = Query(...)):
         try:
             initial = await _get_cached_indices()
             yield f"data: {json.dumps(initial)}\n\n"
+            # Under WSGI (e.g. PythonAnywhere), do not hold the worker thread open indefinitely
+            if os.getenv("DISABLE_BACKGROUND_FEEDER", "").lower() == "true" or os.getenv("PYTHONANYWHERE_DOMAIN"):
+                return
             while True:
                 try:
                     pushed = await asyncio.wait_for(queue.get(), timeout=15.0)
