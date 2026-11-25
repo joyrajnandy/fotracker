@@ -1,8 +1,11 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 import asyncio
+import os
 from sqlalchemy import inspect, text
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
@@ -111,3 +114,18 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 @app.get("/health", tags=["Health"])
 def health_check():
     return {"status": "ok", "app": settings.APP_NAME, "version": "1.0.0"}
+
+
+# Serve built React frontend (for single-host deployments like PythonAnywhere)
+_frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+if os.path.isdir(_frontend_dist):
+    _assets_dir = os.path.join(_frontend_dist, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str):
+        target = os.path.join(_frontend_dist, full_path)
+        if full_path and os.path.isfile(target):
+            return FileResponse(target)
+        return FileResponse(os.path.join(_frontend_dist, "index.html"))
