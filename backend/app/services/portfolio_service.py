@@ -14,7 +14,7 @@ from app.models.broker_cash import BrokerCash
 from app.schemas.investment import InvestmentCreate, InvestmentUpdate, InterestCreate, InterestUpdate
 from app.schemas.broker_cash import BrokerCashCreate, BrokerCashUpdate
 from app.services.pnl_service import calculate_pnl, get_or_create_brokerage_setting
-from app.utils.financial_year import get_financial_year
+from app.utils.financial_year import get_financial_year, get_financial_year_dates
 
 
 # ─────────────────────────── XIRR helper ──────────────────────────────────────
@@ -398,6 +398,10 @@ def get_home_summary(db: Session, user_id: int, financial_year: str) -> dict:
     net_value = round(total_broker_cash + total_profit, 2)
     broker_vs_invested_diff = round(total_broker_cash - total_invested, 2)
 
+    # XIRR: FY-bounded broker cash outflows -> terminal net value at min(today, fy_end)
+    fy_start, fy_end = get_financial_year_dates(financial_year)
+    terminal_date = min(date.today(), fy_end)
+
     broker_cash_rows = (
         db.query(BrokerCash)
         .filter(BrokerCash.user_id == user_id, BrokerCash.financial_year == financial_year)
@@ -407,10 +411,13 @@ def get_home_summary(db: Session, user_id: int, financial_year: str) -> dict:
     xirr_value: Optional[float] = None
     if broker_cash_rows and net_value > 0:
         cash_flows: list[tuple[date, float]] = [
-            (row.cash_date, -float(row.amount)) for row in broker_cash_rows
+            (max(row.cash_date, fy_start), -float(row.amount))
+            for row in broker_cash_rows
+            if row.cash_date <= terminal_date
         ]
-        cash_flows.append((date.today(), net_value))
-        xirr_value = _xirr(cash_flows)
+        if cash_flows and any(cf[0] < terminal_date for cf in cash_flows):
+            cash_flows.append((terminal_date, net_value))
+            xirr_value = _xirr(cash_flows)
 
     growth_data = _build_growth_chart(db, user_id, financial_year, total_broker_cash)
 

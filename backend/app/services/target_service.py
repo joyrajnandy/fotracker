@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import date, timedelta
 from typing import List
 import calendar
@@ -53,15 +52,64 @@ def _all_weeks_in_fy(financial_year: str) -> List[tuple]:
     return weeks
 
 
+def _pro_rata_target(
+    cash_entries: list,
+    period_start: date,
+    period_end: date,
+    fy_start: date,
+    total_fy_days: int,
+) -> tuple[float, float]:
+    """
+    Calculate pro-rata 10% p.a. target and time-weighted capital base for [period_start, period_end]
+    based on each cash deposit date and remaining active days in the period/FY.
+    Returns (target_amount, effective_capital_base_at_period_end).
+    """
+    period_days = (period_end - period_start).days + 1
+    if period_days <= 0 or total_fy_days <= 0:
+        return 0.0, 0.0
+
+    target_sum = 0.0
+    capital_at_end = 0.0
+
+    for c in cash_entries:
+        if c.cash_date > period_end:
+            continue
+        amt = float(c.amount)
+        capital_at_end += amt
+        active_start = max(period_start, fy_start, c.cash_date)
+        active_days = (period_end - active_start).days + 1
+        if active_days > 0:
+            target_sum += amt * 0.10 * (active_days / total_fy_days)
+
+    return round(target_sum, 2), round(capital_at_end, 2)
+
+
 def _recalculate(db: Session, user_id: int, financial_year: str) -> Target:
-    """Targets are strictly based on total broker cash added (0 when no cash added)."""
-    total_broker_cash = float(
-        db.query(func.coalesce(func.sum(BrokerCash.amount), 0))
+    """
+    Calculate FY targets pro-rata based on each cash deposit date
+    and its remaining days in the financial year (0 when no cash added).
+    """
+    fy_start, fy_end = _fy_start_end(financial_year)
+    total_fy_days = (fy_end - fy_start).days + 1
+    today = date.today()
+
+    cash_entries = (
+        db.query(BrokerCash)
         .filter(BrokerCash.user_id == user_id, BrokerCash.financial_year == financial_year)
-        .scalar()
-        or 0
+        .order_by(BrokerCash.cash_date)
+        .all()
     )
-    yearly = round(total_broker_cash * 0.10, 2) if total_broker_cash > 0 else 0.0
+
+    yearly, _ = _pro_rata_target(cash_entries, fy_start, fy_end, fy_start, total_fy_days)
+
+    # Current quarter/month/week pro-rata targets
+    cur_q_range = next(((s, e) for _, s, e in _all_quarters_in_fy(financial_year) if s <= today <= e), (fy_start, fy_end))
+    cur_m_range = next(((s, e) for _, s, e in _all_months_in_fy(financial_year) if s <= today <= e), (fy_start, fy_end))
+    cur_w_range = next(((s, e) for _, s, e in _all_weeks_in_fy(financial_year) if s <= today <= e), (fy_start, fy_end))
+
+    qt, _ = _pro_rata_target(cash_entries, cur_q_range[0], cur_q_range[1], fy_start, total_fy_days)
+    mt, _ = _pro_rata_target(cash_entries, cur_m_range[0], cur_m_range[1], fy_start, total_fy_days)
+    wt, _ = _pro_rata_target(cash_entries, cur_w_range[0], cur_w_range[1], fy_start, total_fy_days)
 
     target = (
         db.query(Target)
@@ -70,17 +118,17 @@ def _recalculate(db: Session, user_id: int, financial_year: str) -> Target:
     )
     if target:
         target.yearly_target = yearly
-        target.quarterly_target = round(yearly / 4, 2)
-        target.monthly_target = round(yearly / 12, 2)
-        target.weekly_target = round(yearly / 52, 2)
+        target.quarterly_target = qt
+        target.monthly_target = mt
+        target.weekly_target = wt
     else:
         target = Target(
             user_id=user_id,
             financial_year=financial_year,
             yearly_target=yearly,
-            quarterly_target=round(yearly / 4, 2),
-            monthly_target=round(yearly / 12, 2),
-            weekly_target=round(yearly / 52, 2),
+            quarterly_target=qt,
+            monthly_target=mt,
+            weekly_target=wt,
         )
         db.add(target)
     db.commit()
@@ -100,14 +148,11 @@ def recalculate_targets_from_investment(db: Session, user_id: int, financial_yea
     return _recalculate(db, user_id, financial_year)
 
 
-def _capital_as_of(cash_entries: list, as_of_date: date) -> float:
-    return sum(float(c.amount) for c in cash_entries if c.cash_date <= as_of_date)
-
-
 def get_target_achievement(db: Session, user_id: int, financial_year: str) -> dict:
-    # Always compute fresh from BrokerCash so 0 investment => 0 target (no stale defaults)
     target = _recalculate(db, user_id, financial_year)
     today = date.today()
+    fy_start, fy_end = _fy_start_end(financial_year)
+    total_fy_days = (fy_end - fy_start).days + 1
 
     all_trades = db.query(Trade).filter(
         Trade.user_id == user_id,
@@ -118,7 +163,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     if b_setting.custom_total_brokerage is not None and len(all_trades) > 0:
         per_trade_fee = float(b_setting.custom_total_brokerage) / len(all_trades)
     else:
-        per_trade_fee = float(b_setting.per_trade_fee if b_setting.per_trade_fee is not None else 25.7)
+        per_trade_fee = float(b_setting.per_trade_fee if b_setting.per_trade_fee is not None else 20.0)
 
     cash_entries = (
         db.query(BrokerCash)
@@ -127,26 +172,23 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
         .all()
     )
 
-    fy_start, _ = _fy_start_end(financial_year)
-    yearly_pnl = calculate_period_pnl(all_trades, fy_start, today, per_trade_fee)
-
+    yearly_pnl = calculate_period_pnl(all_trades, fy_start, min(today, fy_end), per_trade_fee)
     yt = float(target.yearly_target)
 
     def pct(actual: float, tgt: float) -> float:
         return round((actual / tgt) * 100, 2) if tgt > 0 else 0.0
 
-    # ── Quarters ──
+    # ── Quarters (pro-rata by deposit date & remaining days) ──
     quarters = []
     for label, q_start, q_end in _all_quarters_in_fy(financial_year):
-        cap = _capital_as_of(cash_entries, q_end)
-        q_tgt = round((cap * 0.10) / 4, 2) if cap > 0 else 0.0
+        q_tgt, cap = _pro_rata_target(cash_entries, q_start, q_end, fy_start, total_fy_days)
         effective_end = min(q_end, today)
         pnl = calculate_period_pnl(all_trades, q_start, effective_end, per_trade_fee) if q_start <= today else 0.0
         quarters.append({
             "label": label,
             "start": q_start.isoformat(),
             "end": q_end.isoformat(),
-            "capital_base": round(cap, 2),
+            "capital_base": cap,
             "target": q_tgt,
             "pnl": pnl,
             "achieved": pnl >= q_tgt if q_tgt > 0 else False,
@@ -154,18 +196,17 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
             "is_future": q_start > today,
         })
 
-    # ── Months ──
+    # ── Months (pro-rata by deposit date & remaining days) ──
     months = []
     for label, m_start, m_end in _all_months_in_fy(financial_year):
-        cap = _capital_as_of(cash_entries, m_end)
-        m_tgt = round((cap * 0.10) / 12, 2) if cap > 0 else 0.0
+        m_tgt, cap = _pro_rata_target(cash_entries, m_start, m_end, fy_start, total_fy_days)
         effective_end = min(m_end, today)
         pnl = calculate_period_pnl(all_trades, m_start, effective_end, per_trade_fee) if m_start <= today else 0.0
         months.append({
             "label": label,
             "start": m_start.isoformat(),
             "end": m_end.isoformat(),
-            "capital_base": round(cap, 2),
+            "capital_base": cap,
             "target": m_tgt,
             "pnl": pnl,
             "achieved": pnl >= m_tgt if m_tgt > 0 else False,
@@ -173,18 +214,17 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
             "is_future": m_start > today,
         })
 
-    # ── Weeks ──
+    # ── Weeks (pro-rata by deposit date & remaining days) ──
     weeks = []
     for label, w_start, w_end in _all_weeks_in_fy(financial_year):
-        cap = _capital_as_of(cash_entries, w_end)
-        w_tgt = round((cap * 0.10) / 52, 2) if cap > 0 else 0.0
+        w_tgt, cap = _pro_rata_target(cash_entries, w_start, w_end, fy_start, total_fy_days)
         effective_end = min(w_end, today)
         pnl = calculate_period_pnl(all_trades, w_start, effective_end, per_trade_fee) if w_start <= today else 0.0
         weeks.append({
             "label": label,
             "start": w_start.isoformat(),
             "end": w_end.isoformat(),
-            "capital_base": round(cap, 2),
+            "capital_base": cap,
             "target": w_tgt,
             "pnl": pnl,
             "achieved": pnl >= w_tgt if w_tgt > 0 else False,
