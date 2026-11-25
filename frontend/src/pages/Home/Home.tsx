@@ -41,6 +41,7 @@ export default function HomePage() {
   const [interests, setInterests] = useState<Interest[]>([])
   const [brokerCash, setBrokerCash] = useState<BrokerCash[]>([])
   const [indices, setIndices] = useState<MarketIndex[]>([])
+  const [gsecBonds, setGsecBonds] = useState<any[]>([])
   const [aiInsights, setAiInsights] = useState<AIInsights | null>(null)
   const [marketLoading, setMarketLoading] = useState(false)
   const [ltpRefreshing, setLtpRefreshing] = useState(false)
@@ -117,12 +118,14 @@ export default function HomePage() {
       homeApi.getInterests(fy),
       brokerCashApi.list(fy),
       aiApi.getInsights(fy).catch(() => ({ data: null })),
-    ]).then(([s, inv, int, bc, ai]) => {
+      marketApi.getGsec(fy).catch(() => ({ data: { my_bonds: [] } })),
+    ]).then(([s, inv, int, bc, ai, gs]) => {
       setSummary(s.data)
       setInvestments(inv.data)
       setInterests(int.data)
       setBrokerCash(bc.data)
       setAiInsights(ai.data)
+      setGsecBonds(gs.data?.my_bonds || [])
     }).finally(() => setLoading(false))
   }, [fy])
 
@@ -593,6 +596,53 @@ export default function HomePage() {
           </Button>
         </Space>
       </Space>
+
+      {/* ── GSec Next Coupon Payoff Information Banner ────────────────────── */}
+      {gsecBonds.length > 0 && (() => {
+        const sorted = [...gsecBonds]
+          .filter((b) => b.next_payoff_date && b.next_payoff_amount > 0)
+          .sort((a, b) => a.next_payoff_date.localeCompare(b.next_payoff_date))
+        if (!sorted.length) return null
+        const soonest = sorted[0]
+        const totalSemiAnnual = sorted.reduce((s, b) => s + Number(b.next_payoff_amount || 0), 0)
+        return (
+          <Alert
+            type="info"
+            showIcon
+            icon={<BankOutlined style={{ color: '#4f46e5' }} />}
+            style={{
+              marginBottom: 20,
+              borderRadius: 12,
+              background: 'linear-gradient(90deg, #eef2ff 0%, #f0f9ff 100%)',
+              border: '1px solid #c7d2fe',
+            }}
+            message={
+              <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
+                <Text strong style={{ color: '#1e1b4b' }}>
+                  Upcoming GSec Coupon Payoff: Next on{' '}
+                  <Tag color="geekblue" style={{ margin: '0 4px', fontWeight: 700 }}>
+                    {dayjs(soonest.next_payoff_date).format('DD MMM YYYY')}
+                  </Tag>
+                  ({soonest.symbol}: <span style={{ color: '#059669' }}>{fmt(soonest.next_payoff_amount)}</span>)
+                </Text>
+                <Tag color="purple" style={{ fontWeight: 600 }}>
+                  Total Semi-Annual GSec Interest: {fmt(totalSemiAnnual)}
+                </Tag>
+              </Space>
+            }
+            description={
+              <Space wrap size={[12, 6]} style={{ marginTop: 6 }}>
+                {sorted.map((b) => (
+                  <Tag key={b.id} color="blue" style={{ padding: '2px 8px', borderRadius: 6 }}>
+                    <strong>{b.symbol}</strong> ({b.coupon_rate}%): {fmt(b.next_payoff_amount)} on{' '}
+                    {dayjs(b.next_payoff_date).format('DD MMM YYYY')}
+                  </Tag>
+                ))}
+              </Space>
+            }
+          />
+        )
+      })()}
 
       {/* ── XIRR & Total Profit Hero Card ─────────────────────────────────── */}
       <Card className="futuristic-hero" style={{ marginBottom: 20 }}>

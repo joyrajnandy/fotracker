@@ -120,16 +120,29 @@ def _parse_gsec_metadata(symbol: str, fin_name: str = "") -> dict:
 
     # Standard GOI semi-annual coupon cycle
     pay_dates = "Jun 15 & Dec 15"
+    pay_md = [(6, 15), (12, 15)]
     if maturity_year:
         if maturity_year % 2 == 0:
             pay_dates = "Apr 15 & Oct 15"
+            pay_md = [(4, 15), (10, 15)]
         else:
             pay_dates = "Jun 12 & Dec 12"
+            pay_md = [(6, 12), (12, 12)]
+
+    today = date.today()
+    candidates = []
+    for yr in (today.year, today.year + 1):
+        for m, d in pay_md:
+            dt = date(yr, m, d)
+            if dt >= today:
+                candidates.append(dt)
+    next_pay_date = min(candidates).isoformat() if candidates else None
 
     return {
         "coupon_rate": coupon,
         "maturity_year": maturity_year,
         "interest_pay_dates": pay_dates,
+        "next_payoff_date": next_pay_date,
         "face_value": 100.0,
     }
 
@@ -593,6 +606,8 @@ async def get_gsec_bonds(
             "coupon_rate": coupon,
             "maturity_year": meta["maturity_year"],
             "interest_pay_dates": meta["interest_pay_dates"],
+            "next_payoff_date": meta["next_payoff_date"],
+            "next_payoff_amount": round((qty * 100.0 * (coupon / 100.0)) / 2, 2) if coupon else 0.0,
             "face_value": 100.0,
             "qty": qty,
             "buy_price": buy_p,
