@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from pydantic import field_validator
+from typing import List, Union
+import json
 
 
 class Settings(BaseSettings):
@@ -8,7 +10,7 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
 
-    # Database (lightweight SQLite with WAL mode)
+    # Database (lightweight SQLite with WAL mode, or PostgreSQL URL)
     DATABASE_URL: str = "sqlite:///./data/fotracker.db"
 
     # JWT
@@ -23,8 +25,20 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = "Admin@12345"
     ADMIN_FULL_NAME: str = "System Admin"
 
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
+    # CORS (accepts JSON list, comma-separated string, or empty string)
+    CORS_ORIGINS: Union[List[str], str] = ["http://localhost:5173", "http://localhost:3000"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v):
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return ["http://localhost:5173", "http://localhost:3000"]
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):
+                return json.loads(s)
+            return [item.strip() for item in s.split(",") if item.strip()]
+        return v
 
     class Config:
         env_file = ".env"
