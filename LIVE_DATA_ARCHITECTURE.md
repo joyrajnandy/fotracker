@@ -45,6 +45,6 @@ To prevent every connected browser/mobile client from hammering upstream APIs:
 
 ## 3. Scalability & Performance Hardening
 
-- **Database Connection Pooling** (`backend/app/core/database.py`): `pool_size=20`, `max_overflow=40`, `pool_pre_ping=True`, `pool_recycle=1800`.
+- **Lightweight Persistence (`backend/app/core/database.py`)**: Embedded **SQLite 3** (`backend/data/fotracker.db`) with `WAL` journal mode and foreign keys enabled — zero external DB container required.
 - **GZip Compression** (`backend/main.py`): `GZipMiddleware(minimum_size=500)` reduces payload size over mobile Wi-Fi.
 - **LAN / Mobile Access**: Vite dev server binds to `0.0.0.0:5173` with `allowedHosts: true`, and Windows Firewall allows inbound TCP `5173` & `8000` so devices on the same Wi-Fi network can open `http://<HOST_LAN_IP>:5173`.

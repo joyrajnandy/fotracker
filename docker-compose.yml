@@ -1,26 +1,5 @@
-version: "3.9"
-
 services:
-  # ─── PostgreSQL Database ───────────────────────────────────────────────────
-  db:
-    image: postgres:15-alpine
-    container_name: fo_tracker_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: fotracker_db
-      POSTGRES_USER: fotracker
-      POSTGRES_PASSWORD: fotracker123
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fotracker -d fotracker_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ─── FastAPI Backend ───────────────────────────────────────────────────────
+  # ─── FastAPI Backend (Lightweight with SQLite WAL) ──────────────────────────
   backend:
     build:
       context: ./backend
@@ -28,19 +7,16 @@ services:
     container_name: fo_tracker_backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://fotracker:fotracker123@db:5432/fotracker_db
+      DATABASE_URL: sqlite:////app/data/fotracker.db
       SECRET_KEY: ${SECRET_KEY:-change-this-secret-in-production}
       DEBUG: "False"
       CORS_ORIGINS: '["http://localhost:5173","http://localhost:3000","http://localhost:80"]'
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
       - ./backend:/app
 
-  # ─── React Frontend (Dev) ─────────────────────────────────────────────────
+  # ─── React Frontend (Vite) ──────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -52,8 +28,4 @@ services:
     depends_on:
       - backend
     environment:
-      BACKEND_URL: http://backend:8000
       VITE_API_BASE_URL: http://backend:8000
-
-volumes:
-  pgdata:

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import asyncio
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from app.core.config import settings
 from app.core.database import Base, engine, SessionLocal
 from app.core.security import get_password_hash
@@ -19,22 +19,30 @@ logger = logging.getLogger(__name__)
 # Auto-create tables on startup
 Base.metadata.create_all(bind=engine)
 
-# Safe schema evolution for existing DBs
+# Dialect-safe schema evolution (works on both SQLite and PostgreSQL)
+def _ensure_column(table: str, col: str, ddl: str):
+    existing = {c["name"] for c in inspect(engine).get_columns(table)}
+    if col not in existing:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}"))
+
+_ensure_column("investments", "current_value", "NUMERIC(15, 2)")
+_ensure_column("investments", "instrument_code", "VARCHAR(60)")
+_ensure_column("investments", "quantity", "NUMERIC(15, 4) DEFAULT 1")
+_ensure_column("investments", "buy_price", "NUMERIC(15, 4)")
+_ensure_column("investments", "ltp", "NUMERIC(15, 4)")
+_ensure_column("users", "is_admin", "BOOLEAN NOT NULL DEFAULT 0")
+
 with engine.begin() as conn:
-    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS current_value NUMERIC(15, 2)"))
-    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS instrument_code VARCHAR(60)"))
-    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS quantity NUMERIC(15, 4) DEFAULT 1"))
-    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS buy_price NUMERIC(15, 4)"))
-    conn.execute(text("ALTER TABLE investments ADD COLUMN IF NOT EXISTS ltp NUMERIC(15, 4)"))
-    conn.execute(text("ALTER TABLE investments ALTER COLUMN investment_date DROP NOT NULL"))
-    conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
-    conn.execute(text("ALTER TABLE brokerage_settings ALTER COLUMN per_trade_fee SET DEFAULT 25.70"))
+    if engine.dialect.name != "sqlite":
+        conn.execute(text("ALTER TABLE investments ALTER COLUMN investment_date DROP NOT NULL"))
+        conn.execute(text("ALTER TABLE brokerage_settings ALTER COLUMN per_trade_fee SET DEFAULT 25.70"))
     conn.execute(text("UPDATE brokerage_settings SET per_trade_fee = 25.70 WHERE per_trade_fee = 69.00 AND custom_total_brokerage IS NULL"))
     # Ensure at least the first registered user is admin if none exists
     conn.execute(text("""
-        UPDATE users SET is_admin = TRUE
+        UPDATE users SET is_admin = 1
         WHERE id = (SELECT MIN(id) FROM users)
-          AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = TRUE)
+          AND NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
     """))
 
 # First-deployment bootstrap: if users table is completely empty, create initial Admin user

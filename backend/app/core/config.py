@@ -8,8 +8,8 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
 
-    # Database
-    DATABASE_URL: str = "postgresql://fotracker:fotracker123@localhost:5432/fotracker_db"
+    # Database (lightweight SQLite with WAL mode)
+    DATABASE_URL: str = "sqlite:///./data/fotracker.db"
 
     # JWT
     SECRET_KEY: str = "change-this-secret-key"

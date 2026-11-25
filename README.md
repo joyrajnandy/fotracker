@@ -14,10 +14,11 @@ Multi-user, financial-year-aware, with P&L analytics, target tracking and CSV im
 | State | Zustand + TanStack React Query |
 | Backend | FastAPI (Python 3.11) + Uvicorn |
 | ORM | SQLAlchemy 2.0 + Alembic |
-| Auth | JWT (python-jose) + bcrypt |
-| CSV | Pandas |
-| Database | PostgreSQL 15 |
-| Local Dev | Docker Compose |
+| Auth | JWT (python-jose) + bcrypt (Invite-Only + Admin Role) |
+| CSV / Quant | Pandas + PyXIRR |
+| Live Market Data | Webhook + SSE (`nsearchives.nseindia.com`, `mfapi.in`, Yahoo Finance) |
+| Database | SQLite 3 (WAL mode, zero external DB server) |
+| Local Dev | Docker Compose (2 lightweight containers) |
 
 ---
 
@@ -77,13 +78,12 @@ copy .env.example .env
 
 **Step 3 — Start everything with Docker Compose**
 ```powershell
-docker-compose up --build
+docker compose up -d --build
 ```
 This will:
-- Pull PostgreSQL 15 image
-- Build the FastAPI backend image
+- Build the lightweight FastAPI backend image (with embedded SQLite 3 database at `./backend/data/fotracker.db`)
 - Build the React frontend image
-- Start all 3 containers
+- Start both containers (`fo_tracker_backend` & `fo_tracker_frontend`)
 
 Wait for logs to show:
 ```

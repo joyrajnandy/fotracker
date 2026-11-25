@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   Row, Col, Card, Statistic, Select, Table, Tag, Typography, Space, Spin, Segmented,
-  InputNumber, Button, message, Tooltip,
+  InputNumber, Button, message, Tooltip, Grid,
 } from 'antd'
 import {
   ArrowUpOutlined, ArrowDownOutlined, SwapOutlined, EditOutlined, UndoOutlined, CheckOutlined,
@@ -23,6 +23,7 @@ function fmt(v: number) {
 }
 
 export default function PnLPage() {
+  const screens = Grid.useBreakpoint()
   const [financialYears, setFinancialYears] = useState<string[]>([])
   const [fy, setFy] = useState('')
   const [summary, setSummary] = useState<PnLSummary | null>(null)
@@ -415,8 +416,8 @@ export default function PnLPage() {
                     dataKey="name"
                     angle={-40}
                     textAnchor="end"
-                    tick={{ fontSize: 11 }}
-                    interval={0}
+                    tick={{ fontSize: screens.sm ? 11 : 9 }}
+                    interval={screens.md ? 0 : 'preserveStartEnd'}
                     height={90}
                   />
                   <YAxis tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}K`} tick={{ fontSize: 11 }} />

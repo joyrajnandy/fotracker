@@ -37,7 +37,7 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const screens = useBreakpoint()
-  const isDesktop = !!screens.lg
+  const isDesktop = screens.lg !== undefined ? screens.lg : (typeof window !== 'undefined' ? window.innerWidth >= 992 : true)
 
   const { user, logout } = useAuthStore()
   const NAV_ITEMS = user?.is_admin
@@ -164,7 +164,7 @@ export default function AppLayout() {
         </Drawer>
       )}
 
-      <Layout style={{ marginLeft: isDesktop ? 235 : 0, transition: 'margin-left 0.2s ease' }}>
+      <Layout className="app-main-layout" style={{ marginLeft: isDesktop ? 235 : 0, transition: 'margin-left 0.2s ease' }}>
         <Header style={{
           background: 'rgba(255,255,255,0.92)',
           backdropFilter: 'blur(8px)',

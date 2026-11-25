@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Drawer, Space, Typography, Tag, Spin, Alert, Card, Row, Col, Tooltip } from 'antd'
+import { Button, Drawer, Space, Typography, Tag, Spin, Alert, Card, Row, Col, Tooltip, Grid } from 'antd'
 import { RobotOutlined, ReloadOutlined, InfoCircleOutlined } from '@ant-design/icons'
 import { aiApi } from '@/services/api'
 
@@ -29,6 +29,8 @@ interface BotData {
 }
 
 export default function MarketBot() {
+  const screens = Grid.useBreakpoint()
+  const isMobile = screens.sm === false
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<BotData | null>(null)
@@ -88,7 +90,8 @@ export default function MarketBot() {
           </Button>
         }
         placement="right"
-        width={400}
+        width={isMobile ? '100%' : 400}
+        styles={{ wrapper: { maxWidth: '100vw' } }}
         open={open}
         onClose={() => setOpen(false)}
       >
