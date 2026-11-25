@@ -175,10 +175,10 @@ async def _load_nse_gsec_bhavcopy(client: httpx.AsyncClient) -> dict:
                 tckr = (row.get("TckrSymb") or "").strip().upper()
                 isin = (row.get("ISIN") or "").strip().upper()
                 name = (row.get("FinInstrmNm") or tckr).strip()
-                last_p = float(row.get("LastPric") or row.get("ClsPric") or 0)
-                cls_p = float(row.get("ClsPric") or last_p)
+                cls_p = float(row.get("ClsPric") or row.get("LastPric") or 0)
+                last_p = float(row.get("LastPric") or cls_p)
                 prev_p = float(row.get("PrvsClsgPric") or cls_p)
-                price = round(last_p or cls_p, 4)
+                price = round(cls_p or last_p, 4)
                 if price <= 0:
                     continue
 

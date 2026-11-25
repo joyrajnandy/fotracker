@@ -24,9 +24,18 @@ body {
   max-width: 100% !important;
 }
 
+.ant-card-body {
+  min-width: 0;
+}
+
 .ant-collapse-header, .ant-card-head-title {
   white-space: normal !important;
   word-break: break-word;
+}
+
+.ant-segmented {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 /* Tabular numbers for financial precision */
@@ -145,6 +154,14 @@ body {
   .ant-collapse-header {
     flex-wrap: wrap !important;
     gap: 6px;
+    padding: 10px 12px !important;
+  }
+  .ant-collapse-extra {
+    margin-left: 0 !important;
+  }
+  .ant-table-cell {
+    padding: 6px 8px !important;
+    font-size: 12px !important;
   }
   .ant-form-inline {
     display: flex;

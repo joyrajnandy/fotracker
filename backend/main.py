@@ -40,7 +40,7 @@ with engine.begin() as conn:
     if engine.dialect.name != "sqlite":
         conn.execute(text("ALTER TABLE investments ALTER COLUMN investment_date DROP NOT NULL"))
         conn.execute(text("ALTER TABLE brokerage_settings ALTER COLUMN per_trade_fee SET DEFAULT 25.70"))
-    conn.execute(text("UPDATE brokerage_settings SET per_trade_fee = 25.70 WHERE per_trade_fee = 69.00 AND custom_total_brokerage IS NULL"))
+    conn.execute(text("UPDATE brokerage_settings SET per_trade_fee = 20.00 WHERE per_trade_fee IN (69.00, 25.70) AND custom_total_brokerage IS NULL"))
     # Ensure at least the first registered user is admin if none exists
     conn.execute(text("""
         UPDATE users SET is_admin = 1

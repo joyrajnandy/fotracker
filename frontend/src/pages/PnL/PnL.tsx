@@ -79,12 +79,12 @@ export default function PnLPage() {
     if (!fy) return
     setLoading(true)
     try {
-      const { data } = await pnlApi.updateBrokerage(fy, null, 25.7)
+      const { data } = await pnlApi.updateBrokerage(fy, null, 20.0)
       setSummary(data)
       setCustomBrokerage(data.total_brokerage)
-      setPerTradeFee(25.7)
+      setPerTradeFee(20.0)
       setEditingBrokerage(false)
-      message.success('Brokerage reset to ₹25.70 per trade')
+      message.success('Brokerage reset to Zerodha standard (₹20/order + statutory charges)')
     } catch {
       message.error('Failed to reset brokerage')
     } finally {
@@ -189,7 +189,7 @@ export default function PnLPage() {
         <div>
           <Title level={3} style={{ margin: 0 }}>Profit &amp; Loss Analytics</Title>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Weekly Expiry Performance across SENSEX &amp; NIFTY (Net of ₹{summary?.per_trade_fee ?? 25.7}/trade Brokerage)
+            Weekly Expiry Performance across SENSEX &amp; NIFTY (Net of Zerodha Standard Charges: ₹{summary?.per_trade_fee ?? 20}/order + STT + Exch + SEBI + Stamp + 18% GST)
           </Text>
         </div>
         <Space wrap>
@@ -252,17 +252,17 @@ export default function PnLPage() {
         style={{ marginBottom: 20 }}
         title={
           <Space>
-            <span>Brokerage &amp; Charges (₹{summary?.per_trade_fee ?? 25.7} / Trade)</span>
+            <span>Zerodha Standard Charges (₹{summary?.per_trade_fee ?? 20}/order + Statutory)</span>
             {summary?.is_custom_brokerage
               ? <Tag color="orange">Custom Total Active</Tag>
-              : <Tag color="blue">Auto Calculated</Tag>}
+              : <Tag color="blue">Zerodha Auto</Tag>}
           </Space>
         }
         extra={
           editingBrokerage ? (
             <Space>
               <Button type="primary" size="small" icon={<CheckOutlined />} onClick={saveBrokerage}>Save</Button>
-              <Button size="small" icon={<UndoOutlined />} onClick={resetBrokerage}>Reset ₹25.7</Button>
+              <Button size="small" icon={<UndoOutlined />} onClick={resetBrokerage}>Reset Zerodha (₹20)</Button>
             </Space>
           ) : (
             <Button size="small" icon={<EditOutlined />} onClick={() => setEditingBrokerage(true)}>

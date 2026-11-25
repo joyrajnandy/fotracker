@@ -541,10 +541,12 @@ export default function HomePage() {
               ]).map((idx) => {
                 const isUp = (idx.change ?? 0) >= 0
                 return (
-                  <Col key={idx.symbol}>
-                    <Space size={12} style={{
+                  <Col xs={24} sm={12} md="auto" key={idx.symbol}>
+                    <Space wrap size={8} style={{
+                      width: '100%',
+                      justifyContent: 'space-between',
                       background: 'rgba(255,255,255,0.06)',
-                      padding: '6px 14px',
+                      padding: '6px 12px',
                       borderRadius: 10,
                       border: '1px solid rgba(56, 189, 248, 0.25)',
                     }}>
@@ -925,17 +927,17 @@ export default function HomePage() {
         <Panel header="🏛️ Add Holding (GSec / Mutual Fund Only)" key="investment">
           <Form form={invForm} layout="vertical" onFinish={addHolding}>
             <Row gutter={[12, 8]} align="bottom">
-              <Col xs={12} sm={4}>
+              <Col xs={24} sm={8} md={4}>
                 <Form.Item name="instrument_type" label="Instrument" rules={[{ required: true }]}>
                   <Select placeholder="Type">
                     {HOLDING_TYPES.map((t) => <Option key={t} value={t}>{t}</Option>)}
                   </Select>
                 </Form.Item>
               </Col>
-              <Col xs={12} sm={5}>
+              <Col xs={24} sm={16} md={5}>
                 <Form.Item name="instrument_code" label="Instrument Code">
                   <Input
-                    placeholder="e.g. 119551 / GOLDBEES.NS"
+                    placeholder="e.g. 119551 / 734GS2064-GS"
                     addonAfter={
                       <Tooltip title="Fetch Live LTP / NAV">
                         <SyncOutlined
@@ -948,27 +950,27 @@ export default function HomePage() {
                   />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={5}>
+              <Col xs={24} sm={12} md={5}>
                 <Form.Item name="name" label="Name" rules={[{ required: true }]}>
                   <Input placeholder="Scheme / Bond Name" />
                 </Form.Item>
               </Col>
-              <Col xs={8} sm={3}>
+              <Col xs={24} sm={12} md={2}>
                 <Form.Item name="quantity" label="Qty" initialValue={1} rules={[{ required: true }]}>
                   <InputNumber min={0.0001} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col xs={8} sm={3}>
+              <Col xs={24} sm={8} md={3}>
                 <Form.Item name="buy_price" label="Buy Value" rules={[{ required: true }]}>
                   <InputNumber min={0.01} prefix="₹" style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col xs={8} sm={2}>
+              <Col xs={24} sm={8} md={3}>
                 <Form.Item name="ltp" label="LTP">
                   <InputNumber min={0} prefix="₹" style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={2}>
+              <Col xs={24} sm={8} md={2}>
                 <Form.Item>
                   <Button type="primary" htmlType="submit" icon={<PlusOutlined />} block>Add</Button>
                 </Form.Item>

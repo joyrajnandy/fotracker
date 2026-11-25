@@ -14,6 +14,46 @@ def _get_symbol_base(symbol: str) -> str:
     return symbol
 
 
+def calculate_zerodha_charges(trades: list, brokerage_per_order: float = 20.0) -> float:
+    """
+    Calculate Zerodha standard F&O Options brokerage + statutory charges:
+    - Brokerage: Rs 20 per unique executed order_id
+    - STT: 0.1% on sell value (options)
+    - Exchange Txn: 0.03503% (NSE) / 0.0325% (BSE) on turnover
+    - SEBI Charges: Rs 10 / crore (0.0001% of turnover)
+    - Stamp Duty: 0.003% on buy value
+    - GST: 18% on (Brokerage + Exchange Txn + SEBI Charges)
+    """
+    if not trades:
+        return 0.0
+
+    unique_orders = {t.order_id for t in trades if t.order_id}
+    order_count = len(unique_orders) if unique_orders else len(trades)
+    brokerage = order_count * brokerage_per_order
+
+    buy_val = 0.0
+    sell_val = 0.0
+    exch_charge = 0.0
+
+    for t in trades:
+        val = float(t.quantity) * float(t.price)
+        if t.trade_type == "buy":
+            buy_val += val
+        else:
+            sell_val += val
+        exch = (t.exchange or "NSE").upper()
+        rate = 0.000325 if "BSE" in exch or "BFO" in exch else 0.0003503
+        exch_charge += val * rate
+
+    turnover = buy_val + sell_val
+    stt = sell_val * 0.001
+    sebi = turnover * 0.000001
+    stamp = buy_val * 0.00003
+    gst = 0.18 * (brokerage + exch_charge + sebi)
+
+    return round(brokerage + stt + exch_charge + sebi + stamp + gst, 2)
+
+
 def get_or_create_brokerage_setting(db: Session, user_id: int, financial_year: str) -> BrokerageSetting:
     setting = (
         db.query(BrokerageSetting)
@@ -24,7 +64,7 @@ def get_or_create_brokerage_setting(db: Session, user_id: int, financial_year: s
         setting = BrokerageSetting(
             user_id=user_id,
             financial_year=financial_year,
-            per_trade_fee=25.70,
+            per_trade_fee=20.00,  # Zerodha standard Rs 20/order + statutory charges
             custom_total_brokerage=None,
         )
         db.add(setting)
@@ -38,7 +78,7 @@ def set_brokerage_setting(
     user_id: int,
     financial_year: str,
     custom_total_brokerage: Optional[float],
-    per_trade_fee: float = 25.7,
+    per_trade_fee: float = 20.0,
 ) -> BrokerageSetting:
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
     setting.per_trade_fee = per_trade_fee
@@ -62,7 +102,7 @@ def _split_contract_realized_and_open(trades: list, today: date):
 
     realized_by_expiry: dict = defaultdict(lambda: {
         "buy_qty": 0.0, "sell_qty": 0.0, "buy_value": 0.0, "sell_value": 0.0,
-        "gross_pnl": 0.0, "trades_count": 0,
+        "gross_pnl": 0.0, "trades_count": 0, "trades": [],
     })
     open_positions = []
 
@@ -71,7 +111,8 @@ def _split_contract_realized_and_open(trades: list, today: date):
         sq = sum(float(t.quantity) for t in data["sells"])
         bv = sum(float(t.quantity) * float(t.price) for t in data["buys"])
         sv = sum(float(t.quantity) * float(t.price) for t in data["sells"])
-        tc = len(data["buys"]) + len(data["sells"])
+        all_t = data["buys"] + data["sells"]
+        tc = len(all_t)
 
         is_expired = expiry_date is not None and expiry_date < today
         is_flat = abs(bq - sq) <= 1e-6
@@ -79,6 +120,7 @@ def _split_contract_realized_and_open(trades: list, today: date):
         exp_key = (expiry_date, _get_symbol_base(symbol))
         grp = realized_by_expiry[exp_key]
         grp["trades_count"] += tc
+        grp["trades"].extend(all_t)
 
         if is_flat or is_expired:
             grp["buy_qty"] += bq
@@ -87,7 +129,6 @@ def _split_contract_realized_and_open(trades: list, today: date):
             grp["sell_value"] += sv
             grp["gross_pnl"] += (sv - bv)
         else:
-            # Open unexpired position
             matched_qty = min(bq, sq)
             avg_buy = (bv / bq) if bq > 0 else 0.0
             avg_sell = (sv / sq) if sq > 0 else 0.0
@@ -102,7 +143,6 @@ def _split_contract_realized_and_open(trades: list, today: date):
 
             net_qty = bq - sq
             open_avg = avg_buy if net_qty > 0 else avg_sell
-            # Signed open cashflow: negative for net buy cost, positive for net sell proceeds
             open_cashflow = (sv - matched_qty * avg_sell) - (bv - matched_qty * avg_buy)
             open_positions.append({
                 "symbol": symbol,
@@ -124,9 +164,11 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
         .all()
     )
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
-    per_trade_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 25.7)
+    per_order_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 20.0)
     total_trades = len(trades)
-    calculated_brokerage = round(total_trades * per_trade_fee, 2)
+
+    # Calculate exact Zerodha standard charges (Rs 20/order + STT + Exch + SEBI + Stamp + 18% GST)
+    calculated_brokerage = calculate_zerodha_charges(trades, per_order_fee)
     is_custom = setting.custom_total_brokerage is not None
     total_brokerage = round(float(setting.custom_total_brokerage), 2) if is_custom else calculated_brokerage
 
@@ -142,7 +184,11 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
         gross_net_pnl += gross_pnl
         trades_count = grp["trades_count"]
 
-        expiry_brokerage = round(total_brokerage * (trades_count / total_trades), 2) if total_trades > 0 else 0.0
+        if is_custom:
+            expiry_brokerage = round(total_brokerage * (trades_count / total_trades), 2) if total_trades > 0 else 0.0
+        else:
+            expiry_brokerage = calculate_zerodha_charges(grp["trades"], per_order_fee)
+
         net_realized_pnl = round(gross_pnl - expiry_brokerage, 2)
 
         if net_realized_pnl > 0:
@@ -177,7 +223,7 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
         "net_pnl": round(total_profit - total_loss, 2),
         "total_brokerage": total_brokerage,
         "calculated_brokerage": calculated_brokerage,
-        "per_trade_fee": per_trade_fee,
+        "per_trade_fee": per_order_fee,
         "is_custom_brokerage": is_custom,
         "total_trades": total_trades,
         "profitable_expiries": profitable_expiries,
@@ -189,12 +235,12 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
     }
 
 
-def calculate_period_pnl(trades: list, start_date: date, end_date: date, per_trade_fee: float = 25.7) -> float:
-    """Net realized period P&L after deducting brokerage per trade (excludes unexpired open legs)."""
+def calculate_period_pnl(trades: list, start_date: date, end_date: date, per_order_fee: float = 20.0) -> float:
+    """Net realized period P&L after deducting Zerodha standard charges."""
     period = [t for t in trades if start_date <= t.trade_date <= end_date]
     if not period:
         return 0.0
     realized_by_expiry, _ = _split_contract_realized_and_open(period, date.today())
     gross = sum(grp["gross_pnl"] for grp in realized_by_expiry.values())
-    brokerage = len(period) * per_trade_fee
+    brokerage = calculate_zerodha_charges(period, per_order_fee)
     return round(gross - brokerage, 2)
