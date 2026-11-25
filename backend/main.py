@@ -65,12 +65,15 @@ with SessionLocal() as db:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.api.v1.market import run_background_webhook_feeder
-    feeder_task = asyncio.create_task(run_background_webhook_feeder())
+    feeder_task = None
+    if os.getenv("DISABLE_BACKGROUND_FEEDER", "").lower() != "true" and not os.getenv("PYTHONANYWHERE_DOMAIN"):
+        from app.api.v1.market import run_background_webhook_feeder
+        feeder_task = asyncio.create_task(run_background_webhook_feeder())
     try:
         yield
     finally:
-        feeder_task.cancel()
+        if feeder_task is not None:
+            feeder_task.cancel()
 
 
 app = FastAPI(
