@@ -22,15 +22,8 @@ Your repo is already on GitHub:
 4. Configure the service:
    - **Name**: `fo-tracker`
    - **Region**: Singapore (closest to India) or Oregon
-   - **Runtime**: `Python 3` (or `Docker` — both work; Python + Node build is fastest)
-   - **Build Command**:
-     ```bash
-     cd frontend && npm install && npm run build && cd ../backend && pip install -r requirements.txt
-     ```
-   - **Start Command**:
-     ```bash
-     cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT
-     ```
+   - **Runtime**: `Docker` (uses the root `Dockerfile`, which builds `frontend/dist` and runs `uvicorn` on `$PORT` automatically)
+   - *(No manual Build/Start commands needed when using Docker — Render reads the root `Dockerfile` directly.)*
    - **Instance Type**: **Free**
 
 ### Step 3 — Add Environment Variables on Render
