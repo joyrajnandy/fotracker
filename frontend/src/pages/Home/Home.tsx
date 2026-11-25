@@ -9,7 +9,7 @@ import {
   DollarOutlined, BankOutlined, PercentageOutlined, SwapOutlined,
   InfoCircleOutlined, EditOutlined, ForwardOutlined, ReloadOutlined,
   ThunderboltOutlined, PieChartOutlined, RobotOutlined, UploadOutlined,
-  SyncOutlined, CheckCircleOutlined, WarningOutlined,
+  SyncOutlined, CheckCircleOutlined, WarningOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -596,6 +596,37 @@ export default function HomePage() {
           <Button icon={<ForwardOutlined />} onClick={() => setCarryModalOpen(true)}>
             Carry Forward
           </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={async () => {
+              const { data } = await homeApi.exportBackup()
+              const url = window.URL.createObjectURL(new Blob([data]))
+              const a = document.createElement('a')
+              a.href = url
+              a.download = 'fotracker-backup.json'
+              a.click()
+              window.URL.revokeObjectURL(url)
+            }}
+          >
+            Backup
+          </Button>
+          <Upload
+            accept=".json"
+            showUploadList={false}
+            beforeUpload={async (file) => {
+              try {
+                const { data } = await homeApi.restoreBackup(file)
+                const r = data.restored
+                message.success(`Restored: ${r.broker_cash} cash, ${r.investments} holdings, ${r.interests} interests, ${r.trades} trades`)
+                refreshData()
+              } catch {
+                message.error('Restore failed')
+              }
+              return false
+            }}
+          >
+            <Button icon={<UploadOutlined />}>Restore</Button>
+          </Upload>
         </Space>
       </Space>
 

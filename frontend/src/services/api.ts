@@ -60,6 +60,12 @@ export const homeApi = {
   getInterests: (fy?: string) => api.get('/home/interests', { params: { financial_year: fy } }),
   carryForward: (from_fy: string, to_fy: string) =>
     api.post('/home/carry-forward', null, { params: { from_fy, to_fy } }),
+  exportBackup: () => api.get('/home/backup', { responseType: 'blob' }),
+  restoreBackup: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return api.post('/home/restore', form, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 }
 
 // ── Broker Cash ───────────────────────────────────────────────────────────────
