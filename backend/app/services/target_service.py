@@ -5,7 +5,12 @@ import calendar
 from app.models.target import Target
 from app.models.broker_cash import BrokerCash
 from app.models.trade import Trade
-from app.services.pnl_service import calculate_period_pnl, get_or_create_brokerage_setting
+from app.services.pnl_service import (
+    calculate_period_pnl,
+    calculate_zerodha_charges,
+    get_or_create_brokerage_setting,
+    _split_contract_realized_and_open,
+)
 
 
 def _fy_start_end(financial_year: str):
@@ -83,6 +88,102 @@ def _pro_rata_target(
             target_sum += amt * 0.10 * (active_days / total_fy_days)
 
     return round(target_sum, 2), round(capital_at_end, 2)
+
+
+def _analyze_missed_week(
+    all_trades: list,
+    w_start: date,
+    effective_end: date,
+    w_tgt: float,
+    net_pnl: float,
+    custom_total: float | None,
+    total_trades_count: int,
+    today: date,
+) -> dict:
+    """Diagnose why a particular week's target was not met."""
+    period_trades = [t for t in all_trades if w_start <= t.trade_date <= effective_end]
+    shortfall = round(max(0.0, w_tgt - net_pnl), 2)
+
+    if not period_trades:
+        return {
+            "shortfall": shortfall,
+            "trades_count": 0,
+            "gross_pnl": 0.0,
+            "brokerage": 0.0,
+            "reasons": [
+                f"No trades executed during this week; ₹{shortfall:,.2f} target remained unmet."
+            ],
+        }
+
+    realized_by_expiry, open_positions = _split_contract_realized_and_open(period_trades, today)
+    gross_pnl = round(sum(grp["gross_pnl"] for grp in realized_by_expiry.values()), 2)
+    if custom_total is not None and total_trades_count > 0:
+        brokerage = round(custom_total * (len(period_trades) / total_trades_count), 2)
+    else:
+        brokerage = calculate_zerodha_charges(period_trades, 20.0)
+
+    # Per-contract gross P&L to identify biggest losers & win rate
+    contract_pnls: dict[str, float] = {}
+    for t in period_trades:
+        val = float(t.quantity) * float(t.price)
+        contract_pnls[t.symbol] = contract_pnls.get(t.symbol, 0.0) + (val if t.trade_type == "sell" else -val)
+
+    # Only evaluate closed/matched contracts from realized_by_expiry or net contract flow
+    losers = sorted(((sym, p) for sym, p in contract_pnls.items() if p < -1.0), key=lambda x: x[1])
+    winners = [p for p in contract_pnls.values() if p > 1.0]
+    total_contracts = len(contract_pnls)
+
+    reasons: list[str] = []
+
+    if gross_pnl >= w_tgt and net_pnl < w_tgt:
+        reasons.append(
+            f"Gross P&L (+₹{gross_pnl:,.2f}) met the target, but brokerage & charges (₹{brokerage:,.2f} across {len(period_trades)} trades) pulled net P&L below target."
+        )
+    elif losers:
+        worst_sym, worst_val = losers[0]
+        reasons.append(
+            f"Biggest loss in {worst_sym} (-₹{abs(worst_val):,.2f}), dragging weekly P&L down."
+        )
+        if len(losers) > 1:
+            second_sym, second_val = losers[1]
+            reasons.append(
+                f"Additional loss in {second_sym} (-₹{abs(second_val):,.2f})."
+            )
+
+    if total_contracts > 0:
+        win_rate = round((len(winners) / total_contracts) * 100)
+        if len(winners) < total_contracts:
+            reasons.append(
+                f"Only {len(winners)}/{total_contracts} contracts were profitable ({win_rate}% win rate)."
+            )
+
+    if brokerage > 0 and not (gross_pnl >= w_tgt and net_pnl < w_tgt):
+        if net_pnl < 0 and gross_pnl >= 0:
+            reasons.append(
+                f"Brokerage & statutory charges (₹{brokerage:,.2f} across {len(period_trades)} trades) turned positive gross P&L (+₹{gross_pnl:,.2f}) into a net loss."
+            )
+        elif len(period_trades) >= 15 or (w_tgt > 0 and brokerage >= w_tgt * 0.25):
+            reasons.append(
+                f"High charges drag: ₹{brokerage:,.2f} paid across {len(period_trades)} trades."
+            )
+
+    if open_positions:
+        reasons.append(
+            f"{len(open_positions)} position(s) remained open/unexpired in this period, deferring realized P&L."
+        )
+
+    if not reasons:
+        reasons.append(
+            f"Net P&L (+₹{net_pnl:,.2f}) fell ₹{shortfall:,.2f} short of the ₹{w_tgt:,.2f} target."
+        )
+
+    return {
+        "shortfall": shortfall,
+        "trades_count": len(period_trades),
+        "gross_pnl": gross_pnl,
+        "brokerage": brokerage,
+        "reasons": reasons,
+    }
 
 
 def _recalculate(db: Session, user_id: int, financial_year: str) -> Target:
@@ -218,7 +319,24 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     for label, w_start, w_end in _all_weeks_in_fy(financial_year):
         w_tgt, cap = _pro_rata_target(cash_entries, w_start, w_end, fy_start, total_fy_days)
         effective_end = min(w_end, today)
-        pnl = calculate_period_pnl(all_trades, w_start, effective_end, 20.0, custom_total, total_trades_count) if w_start <= today else 0.0
+        is_future = w_start > today
+        pnl = calculate_period_pnl(all_trades, w_start, effective_end, 20.0, custom_total, total_trades_count) if not is_future else 0.0
+        if is_future:
+            w_achieved = False
+            w_pct = 0.0
+        elif w_tgt == 0:
+            w_achieved = True
+            w_pct = 100.0
+        else:
+            w_achieved = pnl >= w_tgt
+            w_pct = pct(pnl, w_tgt)
+
+        miss_analysis = None
+        if not is_future and not w_achieved:
+            miss_analysis = _analyze_missed_week(
+                all_trades, w_start, effective_end, w_tgt, pnl, custom_total, total_trades_count, today
+            )
+
         weeks.append({
             "label": label,
             "start": w_start.isoformat(),
@@ -226,9 +344,10 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
             "capital_base": cap,
             "target": w_tgt,
             "pnl": pnl,
-            "achieved": pnl >= w_tgt if w_tgt > 0 else False,
-            "pct": pct(pnl, w_tgt),
-            "is_future": w_start > today,
+            "achieved": w_achieved,
+            "pct": w_pct,
+            "is_future": is_future,
+            "miss_analysis": miss_analysis,
         })
 
     cur_quarter = next((q for q in quarters if not q["is_future"] and q["end"] >= today.isoformat()), quarters[-1])

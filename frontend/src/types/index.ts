@@ -165,6 +165,14 @@ export interface PnLSummary {
   total_unrealised_pnl?: number
 }
 
+export interface WeekMissAnalysis {
+  shortfall: number
+  trades_count: number
+  gross_pnl: number
+  brokerage: number
+  reasons: string[]
+}
+
 export interface PeriodRow {
   label: string
   start: string
@@ -175,6 +183,7 @@ export interface PeriodRow {
   achieved: boolean
   pct: number
   is_future: boolean
+  miss_analysis?: WeekMissAnalysis | null
 }
 
 export interface TargetAchievement {

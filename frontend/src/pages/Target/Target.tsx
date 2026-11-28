@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react'
 import {
-  Row, Col, Card, Progress, Statistic, Select, Button,
-  Typography, Space, Tag, Spin, Tooltip, message, Tabs, Table, Badge,
+  Row, Col, Card, Progress, Statistic, Select, Button, Switch, Grid,
+  Typography, Space, Tag, Spin, Tooltip, message, Tabs, Table, Badge, Alert,
 } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, ReloadOutlined,
   CalendarOutlined, AimOutlined, ClockCircleOutlined, BankOutlined,
+  BulbOutlined,
 } from '@ant-design/icons'
 import { targetApi, homeApi } from '@/services/api'
 import type { TargetAchievement, PeriodRow } from '@/types'
 
 const { Title, Text } = Typography
 const { Option } = Select
+const { useBreakpoint } = Grid
 
 function fmt(v: number) {
   return `₹${Math.abs(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -91,7 +93,52 @@ function TargetCard({
   )
 }
 
-function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
+function MissAnalysisBox({ row }: { row: PeriodRow }) {
+  const m = row.miss_analysis
+  if (!m) return null
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      icon={<BulbOutlined />}
+      message={
+        <Space wrap size={[12, 4]}>
+          <Text strong style={{ fontSize: 12 }}>Why target was not met</Text>
+          <Tag color="red">Shortfall: {fmt(m.shortfall)}</Tag>
+          <Tag color="blue">{m.trades_count} trades</Tag>
+          <Tag color={m.gross_pnl >= 0 ? 'green' : 'volcano'}>
+            Gross: {m.gross_pnl >= 0 ? '+' : '-'}{fmt(m.gross_pnl)}
+          </Tag>
+          <Tag color="purple">Charges: {fmt(m.brokerage)}</Tag>
+        </Space>
+      }
+      description={
+        <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>
+          {m.reasons.map((r, idx) => (
+            <li key={idx} style={{ marginBottom: 2 }}>{r}</li>
+          ))}
+        </ul>
+      }
+      style={{ padding: '8px 12px', borderRadius: 8 }}
+    />
+  )
+}
+
+function PeriodTable({
+  rows,
+  label,
+  isWeekly = false,
+}: {
+  rows: PeriodRow[]
+  label: string
+  isWeekly?: boolean
+}) {
+  const screens = useBreakpoint()
+  const isMobile = !screens.md
+  const [showAnalysis, setShowAnalysis] = useState(false)
+
+  const isRowGreen = (row: PeriodRow) => !row.is_future && (row.achieved || row.target === 0)
+
   const columns = [
     {
       title: label, dataIndex: 'label', key: 'label', width: 230,
@@ -124,53 +171,164 @@ function PeriodTable({ rows, label }: { rows: PeriodRow[]; label: string }) {
     {
       title: 'Progress', dataIndex: 'pct', key: 'pct', width: 180,
       sorter: (a: PeriodRow, b: PeriodRow) => a.pct - b.pct,
-      render: (v: number, row: PeriodRow) => row.is_future
-        ? <Text type="secondary">—</Text>
-        : (
+      render: (v: number, row: PeriodRow) => {
+        if (row.is_future) return <Text type="secondary">—</Text>
+        const green = isRowGreen(row)
+        const displayPct = row.target === 0 ? 100 : v
+        return (
           <Progress
-            percent={Math.min(Math.abs(v), 100)}
-            strokeColor={row.achieved ? '#10b981' : v < 0 ? '#ef4444' : '#4361ee'}
+            percent={Math.min(Math.abs(displayPct), 100)}
+            strokeColor={green ? '#10b981' : v < 0 ? '#ef4444' : '#4361ee'}
             trailColor="#f1f5f9"
-            format={() => `${v.toFixed(1)}%`}
+            format={() => `${displayPct.toFixed(1)}%`}
             size="small"
             style={{ width: 130 }}
           />
-        ),
+        )
+      },
     },
     {
-      title: 'Status', key: 'status', width: 110, align: 'center' as const,
-      sorter: (a: PeriodRow, b: PeriodRow) => Number(a.achieved) - Number(b.achieved),
-      render: (_: any, row: PeriodRow) => row.is_future
-        ? <Tag color="default">Future</Tag>
-        : row.achieved
+      title: 'Status', key: 'status', width: 120, align: 'center' as const,
+      sorter: (a: PeriodRow, b: PeriodRow) => Number(isRowGreen(a)) - Number(isRowGreen(b)),
+      render: (_: any, row: PeriodRow) => {
+        if (row.is_future) return <Tag color="default">Future</Tag>
+        if (row.target === 0) return <Tag icon={<CheckCircleOutlined />} color="success">Zero Target</Tag>
+        return row.achieved
           ? <Tag icon={<CheckCircleOutlined />} color="success">Done</Tag>
-          : <Tag icon={<CloseCircleOutlined />} color="error">Pending</Tag>,
+          : <Tag icon={<CloseCircleOutlined />} color="error">Pending</Tag>
+      },
     },
   ]
 
-  const achieved = rows.filter((r) => !r.is_future && r.achieved).length
+  const achieved = rows.filter((r) => isRowGreen(r)).length
   const past = rows.filter((r) => !r.is_future).length
+  const missedWeekKeys = isWeekly && showAnalysis
+    ? rows.filter((r) => !r.is_future && !isRowGreen(r) && r.miss_analysis).map((r) => r.label)
+    : []
 
   return (
     <>
-      <Space style={{ marginBottom: 12 }}>
-        <Badge count={achieved} overflowCount={999} style={{ backgroundColor: '#10b981' }} />
-        <Text type="secondary">of {past} elapsed periods achieved</Text>
-        {past > 0 && (
-          <Tag color={achieved === past ? 'green' : achieved > past / 2 ? 'orange' : 'red'}>
-            {((achieved / past) * 100).toFixed(0)}% hit rate
-          </Tag>
+      <style>{`
+        .row-achieved td { background-color: #f0fdf4 !important; }
+        .row-achieved:hover td { background-color: #dcfce7 !important; }
+        .row-future td { opacity: 0.65; }
+      `}</style>
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 12,
+      }}>
+        <Space wrap>
+          <Badge count={achieved} overflowCount={999} style={{ backgroundColor: '#10b981' }} />
+          <Text type="secondary">
+            of {past} {isWeekly ? 'shown' : 'elapsed'} periods achieved
+          </Text>
+          {past > 0 && (
+            <Tag color={achieved === past ? 'green' : achieved > past / 2 ? 'orange' : 'red'}>
+              {((achieved / past) * 100).toFixed(0)}% hit rate
+            </Tag>
+          )}
+        </Space>
+        {isWeekly && (
+          <Space size={8}>
+            <BulbOutlined style={{ color: showAnalysis ? '#f59e0b' : '#94a3b8' }} />
+            <Text style={{ fontSize: 13 }}>Why Target Missed Analysis</Text>
+            <Switch
+              size="small"
+              checked={showAnalysis}
+              onChange={setShowAnalysis}
+              checkedChildren="Show"
+              unCheckedChildren="Hide"
+            />
+          </Space>
         )}
-      </Space>
-      <Table
-        dataSource={rows}
-        columns={columns}
-        rowKey="label"
-        size="small"
-        pagination={false}
-        rowClassName={(row) => row.is_future ? 'row-future' : row.achieved ? 'row-achieved' : ''}
-        scroll={{ y: 420, x: 750 }}
-      />
+      </div>
+
+      {isMobile ? (
+        <Space direction="vertical" style={{ width: '100%' }} size={10}>
+          {rows.map((row) => {
+            const green = isRowGreen(row)
+            const displayPct = row.target === 0 && !row.is_future ? 100 : row.pct
+            return (
+              <Card
+                key={row.label}
+                size="small"
+                style={{
+                  borderRadius: 10,
+                  borderColor: green ? '#bbf7d0' : row.is_future ? '#e2e8f0' : '#fecaca',
+                  background: green ? '#f0fdf4' : '#ffffff',
+                  opacity: row.is_future ? 0.7 : 1,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                  <Text strong style={{ fontSize: 13 }}>{row.label}</Text>
+                  {row.is_future ? (
+                    <Tag color="default">Future</Tag>
+                  ) : row.target === 0 ? (
+                    <Tag icon={<CheckCircleOutlined />} color="success">Zero Target</Tag>
+                  ) : row.achieved ? (
+                    <Tag icon={<CheckCircleOutlined />} color="success">Done</Tag>
+                  ) : (
+                    <Tag icon={<CloseCircleOutlined />} color="error">Pending</Tag>
+                  )}
+                </div>
+                <Row gutter={[8, 6]} style={{ fontSize: 12, marginBottom: 8 }}>
+                  <Col span={8}>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11 }}>Capital</Text>
+                    <Text>{fmt(row.capital_base)}</Text>
+                  </Col>
+                  <Col span={8}>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11 }}>Target</Text>
+                    <Text>{fmt(row.target)}</Text>
+                  </Col>
+                  <Col span={8}>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11 }}>P&amp;L</Text>
+                    {row.is_future ? (
+                      <Text type="secondary">—</Text>
+                    ) : (
+                      <Text strong style={{ color: row.pnl >= 0 ? '#10b981' : '#ef4444' }}>
+                        {row.pnl >= 0 ? '+' : '-'}{fmt(row.pnl)}
+                      </Text>
+                    )}
+                  </Col>
+                </Row>
+                {!row.is_future && (
+                  <Progress
+                    percent={Math.min(Math.abs(displayPct), 100)}
+                    strokeColor={green ? '#10b981' : row.pnl < 0 ? '#ef4444' : '#4361ee'}
+                    trailColor="#e2e8f0"
+                    format={() => `${displayPct.toFixed(1)}%`}
+                    size="small"
+                  />
+                )}
+                {isWeekly && showAnalysis && !row.is_future && !green && row.miss_analysis && (
+                  <div style={{ marginTop: 10 }}>
+                    <MissAnalysisBox row={row} />
+                  </div>
+                )}
+              </Card>
+            )
+          })}
+        </Space>
+      ) : (
+        <Table
+          dataSource={rows}
+          columns={columns}
+          rowKey="label"
+          size="small"
+          pagination={false}
+          rowClassName={(row) => row.is_future ? 'row-future' : isRowGreen(row) ? 'row-achieved' : ''}
+          expandable={isWeekly ? {
+            expandedRowKeys: missedWeekKeys,
+            showExpandColumn: false,
+            expandedRowRender: (row) => <MissAnalysisBox row={row} />,
+          } : undefined}
+          scroll={{ y: 420, x: 750 }}
+        />
+      )}
     </>
   )
 }
@@ -222,6 +380,14 @@ export default function TargetPage() {
   const activeQ = a?.all_quarters.find((q) => q.label === selectedQuarter)
   const activeM = a?.all_months.find((m) => m.label === selectedMonth)
   const activeW = a?.all_weeks.find((w) => w.label === selectedWeek)
+
+  // Show only the 5 most recent elapsed/current weeks in All Periods Breakdown
+  const visibleWeeks = a
+    ? (() => {
+        const elapsed = a.all_weeks.filter((w) => !w.is_future)
+        return elapsed.length >= 5 ? elapsed.slice(-5) : a.all_weeks.slice(0, 5)
+      })()
+    : []
 
   return (
     <Spin spinning={loading}>
@@ -357,11 +523,11 @@ export default function TargetPage() {
               key: 'weeks',
               label: (
                 <Space>
-                  <CalendarOutlined />Weeks
-                  {a && <Tag color="blue">{a.all_weeks.filter((w) => !w.is_future && w.achieved).length}/{a.all_weeks.filter((w) => !w.is_future).length}</Tag>}
+                  <CalendarOutlined />Weeks (Last 5)
+                  {a && <Tag color="blue">{visibleWeeks.filter((w) => !w.is_future && (w.achieved || w.target === 0)).length}/{visibleWeeks.filter((w) => !w.is_future).length}</Tag>}
                 </Space>
               ),
-              children: a ? <PeriodTable rows={a.all_weeks} label="Week" /> : null,
+              children: a ? <PeriodTable rows={visibleWeeks} label="Week" isWeekly /> : null,
             },
           ]}
         />

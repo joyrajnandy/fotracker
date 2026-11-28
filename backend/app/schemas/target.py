@@ -1,5 +1,13 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
+
+
+class WeekMissAnalysis(BaseModel):
+    shortfall: float
+    trades_count: int
+    gross_pnl: float
+    brokerage: float
+    reasons: List[str]
 
 
 class TargetOut(BaseModel):
@@ -24,6 +32,7 @@ class PeriodRow(BaseModel):
     achieved: bool
     pct: float
     is_future: bool
+    miss_analysis: Optional[WeekMissAnalysis] = None
 
 
 class TargetAchievement(BaseModel):
