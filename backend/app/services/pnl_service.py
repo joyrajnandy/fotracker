@@ -14,44 +14,64 @@ def _get_symbol_base(symbol: str) -> str:
     return symbol
 
 
+def _is_futures_symbol(symbol: str) -> bool:
+    sym = (symbol or "").upper()
+    return sym.endswith("FUT") or ("FUT" in sym and not (sym.endswith("CE") or sym.endswith("PE")))
+
+
 def calculate_zerodha_charges(trades: list, brokerage_per_order: float = 20.0) -> float:
     """
-    Calculate Zerodha standard F&O Options brokerage + statutory charges:
-    - Brokerage: Rs 20 per unique executed order_id
-    - STT: 0.1% on sell value (options)
-    - Exchange Txn: 0.03503% (NSE) / 0.0325% (BSE) on turnover
-    - SEBI Charges: Rs 10 / crore (0.0001% of turnover)
-    - Stamp Duty: 0.003% on buy value
-    - GST: 18% on (Brokerage + Exchange Txn + SEBI Charges)
+    Calculate Zerodha standard F&O brokerage + statutory charges:
+    - Options: Rs 20/order, STT 0.1% on sell, Exch 0.03503% (NSE) / 0.0325% (BSE),
+      IPFT Rs 50/cr (NSE), SEBI Rs 10/cr, Stamp 0.003% on buy, GST 18% on (Brok+Exch+IPFT+SEBI).
+    - Futures: min(0.03%, Rs 20)/order, STT 0.02% on sell, Exch 0.00173% (NSE) / 0% (BSE),
+      IPFT Rs 10/cr (NSE), SEBI Rs 10/cr, Stamp 0.002% on buy, GST 18% on (Brok+Exch+IPFT+SEBI).
     """
     if not trades:
         return 0.0
 
-    unique_orders = {t.order_id for t in trades if t.order_id}
-    order_count = len(unique_orders) if unique_orders else len(trades)
-    brokerage = order_count * brokerage_per_order
+    order_groups: dict = defaultdict(list)
+    for idx, t in enumerate(trades):
+        key = t.order_id if t.order_id else f"__trade_{idx}"
+        order_groups[key].append(t)
 
-    buy_val = 0.0
-    sell_val = 0.0
+    brokerage = 0.0
+    for grp in order_groups.values():
+        is_fut = all(_is_futures_symbol(t.symbol) for t in grp)
+        if is_fut:
+            ord_val = sum(float(t.quantity) * float(t.price) for t in grp)
+            brokerage += min(ord_val * 0.0003, brokerage_per_order)
+        else:
+            brokerage += brokerage_per_order
+
+    stt = 0.0
     exch_charge = 0.0
+    ipft = 0.0
+    sebi = 0.0
+    stamp = 0.0
 
     for t in trades:
         val = float(t.quantity) * float(t.price)
-        if t.trade_type == "buy":
-            buy_val += val
-        else:
-            sell_val += val
         exch = (t.exchange or "NSE").upper()
-        rate = 0.000325 if "BSE" in exch or "BFO" in exch else 0.0003503
-        exch_charge += val * rate
+        is_bse = "BSE" in exch or "BFO" in exch
+        is_fut = _is_futures_symbol(t.symbol)
 
-    turnover = buy_val + sell_val
-    stt = sell_val * 0.001
-    sebi = turnover * 0.000001
-    stamp = buy_val * 0.00003
-    gst = 0.18 * (brokerage + exch_charge + sebi)
+        if t.trade_type == "buy":
+            stamp += val * (0.00002 if is_fut else 0.00003)
+        else:
+            stt += val * (0.0002 if is_fut else 0.001)
 
-    return round(brokerage + stt + exch_charge + sebi + stamp + gst, 2)
+        if is_fut:
+            exch_charge += 0.0 if is_bse else val * 0.0000173
+            ipft += 0.0 if is_bse else val * 0.000001
+        else:
+            exch_charge += val * (0.000325 if is_bse else 0.0003503)
+            ipft += 0.0 if is_bse else val * 0.000005
+
+        sebi += val * 0.000001
+
+    gst = 0.18 * (brokerage + exch_charge + ipft + sebi)
+    return round(brokerage + stt + exch_charge + ipft + sebi + stamp + gst, 2)
 
 
 def get_or_create_brokerage_setting(db: Session, user_id: int, financial_year: str) -> BrokerageSetting:
@@ -164,10 +184,10 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
         .all()
     )
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
-    per_order_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 20.0)
+    per_order_fee = 20.0
     total_trades = len(trades)
 
-    # Calculate exact Zerodha standard charges (Rs 20/order + STT + Exch + SEBI + Stamp + 18% GST)
+    # Calculate exact Zerodha standard charges (Rs 20/order + STT + Exch + IPFT + SEBI + Stamp + 18% GST)
     calculated_brokerage = calculate_zerodha_charges(trades, per_order_fee)
     is_custom = setting.custom_total_brokerage is not None
     total_brokerage = round(float(setting.custom_total_brokerage), 2) if is_custom else calculated_brokerage
@@ -235,12 +255,22 @@ def calculate_pnl(db: Session, user_id: int, financial_year: str) -> dict:
     }
 
 
-def calculate_period_pnl(trades: list, start_date: date, end_date: date, per_order_fee: float = 20.0) -> float:
-    """Net realized period P&L after deducting Zerodha standard charges."""
+def calculate_period_pnl(
+    trades: list,
+    start_date: date,
+    end_date: date,
+    per_order_fee: float = 20.0,
+    custom_total_brokerage: Optional[float] = None,
+    total_trades_count: int = 0,
+) -> float:
+    """Net realized period P&L after deducting Zerodha standard charges (or apportioned custom brokerage)."""
     period = [t for t in trades if start_date <= t.trade_date <= end_date]
     if not period:
         return 0.0
     realized_by_expiry, _ = _split_contract_realized_and_open(period, date.today())
     gross = sum(grp["gross_pnl"] for grp in realized_by_expiry.values())
-    brokerage = calculate_zerodha_charges(period, per_order_fee)
+    if custom_total_brokerage is not None and total_trades_count > 0:
+        brokerage = round(custom_total_brokerage * (len(period) / total_trades_count), 2)
+    else:
+        brokerage = calculate_zerodha_charges(period, per_order_fee)
     return round(gross - brokerage, 2)

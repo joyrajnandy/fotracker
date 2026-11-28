@@ -39,7 +39,8 @@ def _all_weeks_in_fy(financial_year: str) -> List[tuple]:
     yr = int(financial_year.split("-")[0])
     start = date(yr, 4, 1)
     end = date(yr + 1, 3, 31)
-    cur = start - timedelta(days=start.weekday())
+    # Weeks end every Thursday (Friday=4 .. Thursday=3), clipped to [fy_start, fy_end]
+    cur = start - timedelta(days=(start.weekday() - 4) % 7)
     weeks = []
     week_num = 1
     while cur <= end:
@@ -160,10 +161,8 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     ).all()
 
     b_setting = get_or_create_brokerage_setting(db, user_id, financial_year)
-    if b_setting.custom_total_brokerage is not None and len(all_trades) > 0:
-        per_trade_fee = float(b_setting.custom_total_brokerage) / len(all_trades)
-    else:
-        per_trade_fee = float(b_setting.per_trade_fee if b_setting.per_trade_fee is not None else 20.0)
+    custom_total = float(b_setting.custom_total_brokerage) if b_setting.custom_total_brokerage is not None else None
+    total_trades_count = len(all_trades)
 
     cash_entries = (
         db.query(BrokerCash)
@@ -172,7 +171,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
         .all()
     )
 
-    yearly_pnl = calculate_period_pnl(all_trades, fy_start, min(today, fy_end), per_trade_fee)
+    yearly_pnl = calculate_period_pnl(all_trades, fy_start, min(today, fy_end), 20.0, custom_total, total_trades_count)
     yt = float(target.yearly_target)
 
     def pct(actual: float, tgt: float) -> float:
@@ -183,7 +182,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     for label, q_start, q_end in _all_quarters_in_fy(financial_year):
         q_tgt, cap = _pro_rata_target(cash_entries, q_start, q_end, fy_start, total_fy_days)
         effective_end = min(q_end, today)
-        pnl = calculate_period_pnl(all_trades, q_start, effective_end, per_trade_fee) if q_start <= today else 0.0
+        pnl = calculate_period_pnl(all_trades, q_start, effective_end, 20.0, custom_total, total_trades_count) if q_start <= today else 0.0
         quarters.append({
             "label": label,
             "start": q_start.isoformat(),
@@ -201,7 +200,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     for label, m_start, m_end in _all_months_in_fy(financial_year):
         m_tgt, cap = _pro_rata_target(cash_entries, m_start, m_end, fy_start, total_fy_days)
         effective_end = min(m_end, today)
-        pnl = calculate_period_pnl(all_trades, m_start, effective_end, per_trade_fee) if m_start <= today else 0.0
+        pnl = calculate_period_pnl(all_trades, m_start, effective_end, 20.0, custom_total, total_trades_count) if m_start <= today else 0.0
         months.append({
             "label": label,
             "start": m_start.isoformat(),
@@ -219,7 +218,7 @@ def get_target_achievement(db: Session, user_id: int, financial_year: str) -> di
     for label, w_start, w_end in _all_weeks_in_fy(financial_year):
         w_tgt, cap = _pro_rata_target(cash_entries, w_start, w_end, fy_start, total_fy_days)
         effective_end = min(w_end, today)
-        pnl = calculate_period_pnl(all_trades, w_start, effective_end, per_trade_fee) if w_start <= today else 0.0
+        pnl = calculate_period_pnl(all_trades, w_start, effective_end, 20.0, custom_total, total_trades_count) if w_start <= today else 0.0
         weeks.append({
             "label": label,
             "start": w_start.isoformat(),

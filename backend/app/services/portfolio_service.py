@@ -13,7 +13,7 @@ from app.models.trade import Trade
 from app.models.broker_cash import BrokerCash
 from app.schemas.investment import InvestmentCreate, InvestmentUpdate, InterestCreate, InterestUpdate
 from app.schemas.broker_cash import BrokerCashCreate, BrokerCashUpdate
-from app.services.pnl_service import calculate_pnl, get_or_create_brokerage_setting
+from app.services.pnl_service import calculate_pnl, calculate_zerodha_charges, get_or_create_brokerage_setting
 from app.utils.financial_year import get_financial_year, get_financial_year_dates
 
 
@@ -454,18 +454,24 @@ def _build_growth_chart(db: Session, user_id: int, financial_year: str, total_ca
 
     setting = get_or_create_brokerage_setting(db, user_id, financial_year)
     total_trades = len(trades)
-    if setting.custom_total_brokerage is not None and total_trades > 0:
-        eff_fee = float(setting.custom_total_brokerage) / total_trades
-    else:
-        eff_fee = float(setting.per_trade_fee if setting.per_trade_fee is not None else 25.7)
+    is_custom = setting.custom_total_brokerage is not None and total_trades > 0
+    custom_per_trade = (float(setting.custom_total_brokerage) / total_trades) if is_custom else 0.0
 
     monthly_pnl: dict = defaultdict(float)
+    monthly_trades: dict = defaultdict(list)
     monthly_int: dict = defaultdict(float)
 
     for t in trades:
         mk = t.trade_date.strftime("%Y-%m")
         val = float(t.quantity) * float(t.price)
-        monthly_pnl[mk] += (val if t.trade_type == "sell" else -val) - eff_fee
+        monthly_pnl[mk] += (val if t.trade_type == "sell" else -val)
+        monthly_trades[mk].append(t)
+
+    for mk, m_trades in monthly_trades.items():
+        if is_custom:
+            monthly_pnl[mk] -= custom_per_trade * len(m_trades)
+        else:
+            monthly_pnl[mk] -= calculate_zerodha_charges(m_trades, 20.0)
 
     for i in interests:
         monthly_int[i.interest_date.strftime("%Y-%m")] += float(i.amount)
